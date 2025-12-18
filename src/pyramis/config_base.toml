@@ -1,0 +1,68 @@
+OUTPUT_FORMAT = "output_{iout:05d}"
+OUTPUT_FORMAT_ANY = "output_*"
+FILENAME_FORMAT = "{data}_{iout:05d}.out{icpu:05d}"
+FILENAME_FORMAT_ANY = "{data}_{iout:05d}.out*"
+FILENAME_FORMAT_HDF = "{data}_{iout:05d}.h5"
+NAMELIST_FILENAME = "namelist.txt"
+FILE_DESCRIPTOR_FORMAT = "{data}_file_descriptor.txt"
+DEFAULT_N_PROCS = 8
+DEFAULT_LEVEL_SUBDIVIDE = 2
+DIM_KEYS = ["x", "y", "z"]
+
+[VARIABLE_NAME_ABBREVIATION]
+position_x = "x"
+position_y = "y"
+position_z = "z"
+velocity_x = "vx"
+velocity_y = "vy"
+velocity_z = "vz"
+mass = "m"
+identity = "id"
+levelp = "level"
+density = "rho"
+pressure = "P"
+metallicity = "metal"
+initial_mass = "m0"
+birth_time = "epoch"
+birth_density = "rho0"
+chem_H = "H"
+chem_O = "O"
+chem_Fe = "Fe"
+chem_C = "C"
+chem_N = "N"
+chem_Si = "Si"
+chem_S = "S"
+dust_bin01 = "d1"
+dust_bin02 = "d2"
+dust_bin03 = "d3"
+dust_bin04 = "d4"
+refinement_level = "refmask"
+dMsmbh = "dM"
+dMBH_coarse = "Mdot"
+dMEd_disk = "Medd"
+jsink_x = "jx"
+jsink_y = "jy"
+jsink_z = "jz"
+spin_x = "sx"
+spin_y = "sy"
+spin_z = "sz"
+spin_magnitude = "spinmag"
+
+[CGS_UNIT]
+km = 1e5
+pc = 3.08e18
+kpc = 3.08e21
+Mpc = 3.08e24
+Gpc = 3.08e27
+yr = 3.1536e7
+Myr = 3.1536e13
+Gyr = 3.1536e16
+
+[PARTICLE_TYPE_DEFINITION]
+cloud_tracer = -3
+star_tracer = -2
+gas_tracer = 0
+dm = 1
+star = 2
+cloud = 3
+tracer = [-3, -2, 0]

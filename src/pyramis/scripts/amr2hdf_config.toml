@@ -1,0 +1,71 @@
+# RAMSES repositiory path where 'output_*' is located
+repo = "/storage7/NewCluster/snapshots"
+
+# Range of iout to be converted
+imin = 1
+imax = 10
+
+# Version to be written. Lower versions will be overwritten if overwrite == true
+version = "1.0"
+overwrite = true
+
+# Number of ramses files to be loaded at once. Use it for the large simulation which cannot be held by cache at once
+# nload = 160
+
+# Number of threads participating on reading the data
+nthread = 8
+
+# Walltime limit in hours; script will stop after this time
+walltime = 24.0
+
+# Number of chunks to divide the data into hilbert domains
+nchunk = 8000
+
+# Simulation publication and description to be stored in HDF5 attributes
+sim_publication = "https://doi.org/10.48550/arXiv.2507.06301"
+sim_description_common = """
+For any use of this data, please cite the original publication (Han et al.):
+{sim_publication}"""
+
+# Dataset keyword arguments for HDF5 datasets
+[dataset_kw]
+compression = "lzf"
+shuffle = true
+fletcher32 = true
+chunks = true
+
+# Output data types for particle data. If blank, dtypes will be automatically inferred from RAMSES files
+[converted_dtypes_part]
+# star = [
+#   ["x","f8"], ["y","f8"], ["z","f8"],
+#   ["vx","f4"], ["vy","f4"], ["vz","f4"],
+#   ["m","f4"], ["id","i4"], ["level","i1"],
+#   ["family","i1"], ["tag","i1"], ["epoch","f4"],
+#   ["metal","f4"], ["partp","i4"], ["cpu","i2"]]
+
+# dm = [
+#   ["x","f8"], ["y","f8"], ["z","f8"],
+#   ["vx","f4"], ["vy","f4"], ["vz","f4"],
+#   ["m","f4"], ["id","i4"], ["level","i1"],
+#   ["family","i1"], ["tag","i1"], ["partp","i4"], ["cpu","i2"]]
+
+# tracer = [
+#   ["x","f8"], ["y","f8"], ["z","f8"],
+#   ["m","f4"], ["id","i4"], ["level","i1"],
+#   ["family","i1"], ["tag","i1"], ["partp","i4"], ["cpu","i2"]]
+
+# sink = [
+#   ["x","f8"], ["y","f8"], ["z","f8"],
+#   ["vx","f4"], ["vy","f4"], ["vz","f4"],
+#   ["m","f4"], ["id","i4"],
+#   ["tform","f4"], ["dM","f4"], ["dMBH","f4"], ["dMEd","f4"], ["Esave","f4"],
+#   ["jx","f4"], ["jy","f4"], ["jz","f4"],
+#   ["sx","f4"], ["sy","f4"], ["sz","f4"], ["spinmag","f4"]]
+
+# Output data types for cell data. If blank, dtypes will be automatically inferred from RAMSES files
+[converted_dtypes_cell]
+# cell = [
+#   ["x","f8"], ["y","f8"], ["z","f8"], ["level","i1"],
+#   ["rho","f4"], ["vx","f4"], ["vy","f4"], ["vz","f4"], ["P","f4"],
+#   ["refmask","f4"], ["sigma","f4"], ["pot","f4"], ["cpu","i2"],
+# ]

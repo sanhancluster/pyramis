@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyramis"
+version = "0.1.0"
+description = "Python-based Ramses reader for minimalist"
+authors = [{ name = "San Han" }]
+requires-python = ">=3.11"
+
+dependencies = [
+    "h5py>=3.12.1",
+    "numpy>=2.3.5"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
