@@ -1,21 +1,42 @@
+from __future__ import annotations
+
 import tomllib
-from pathlib import Path
-import multiprocessing as mp
+from importlib.resources import files
+from typing import Any
 
-CONFIG_PATH = Path(__file__).parent / "config.toml"
-BASE_CONFIG_PATH = Path(__file__).parent / "config_base.toml"
 
-def load_config(path: str | Path = CONFIG_PATH) -> dict:
-    """Load configuration from a TOML file."""
-    base_path = BASE_CONFIG_PATH
-    path = Path(path)
+PACKAGE = __package__ or "pyramis"
+BASE_CONFIG = "config_base.toml"
+CONFIG = "config.toml"
 
-    if not path.exists():
-        path = BASE_CONFIG_PATH
-    
-    with base_path.open("rb") as f:
-        config = tomllib.load(f)
 
-    with path.open("rb") as f:
-        config.update(tomllib.load(f))
+def _deep_update(dst: dict[str, Any], src: dict[str, Any]) -> dict[str, Any]:
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            _deep_update(dst[k], v)  # type: ignore[index]
+        else:
+            dst[k] = v
+    return dst
+
+
+def _load_packaged_toml(name: str) -> dict[str, Any]:
+    return tomllib.loads(data)
+
+
+def load_config() -> dict[str, Any]:
+    """
+    Load configuration bundled with the package.
+    Order:
+      1) config_base.toml (required)
+      2) config.toml (optional, overrides base)
+    """
+    config = _load_packaged_toml(BASE_CONFIG)
+
+    try:
+        data = files(PACKAGE).joinpath(CONFIG).read_bytes()
+        override = tomllib.loads(data)
+
+    except FileNotFoundError:
         return config
+
+    return _deep_update(config, override)
