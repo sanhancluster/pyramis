@@ -6,16 +6,23 @@ build-backend = "setuptools.build_meta"
 name = "pyramis"
 version = "0.1.0"
 description = "A python-based ramses analyzer for minimalist"
-authors = [{ name = "San Han" }]
+authors = [
+  {name="San Han", email="san.han@iap.fr"}
+]
 requires-python = ">=3.11"
-
+license = {text = "MIT"}
 dependencies = [
     "h5py>=3.12.1",
     "numpy>=1.26.4"
 ]
+readme = "README.md"
+keywords = ["ramses"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.urls]
+Repository = "https://github.com/sanhan/pyramis"
