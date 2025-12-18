@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pyramis"
 version = "0.1.0"
-description = "Python-based Ramses reader for minimalist"
+description = "A python-based ramses analyzer for minimalist"
 authors = [{ name = "San Han" }]
 requires-python = ">=3.11"
 
 dependencies = [
     "h5py>=3.12.1",
-    "numpy>=2.3.5"
+    "numpy>=1.26.4"
 ]
 
 [tool.setuptools]
