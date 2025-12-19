@@ -13,7 +13,8 @@ requires-python = ">=3.11"
 license = {file = "LICENSE"}
 dependencies = [
     "h5py>=3.12.1",
-    "numpy>=1.26.4"
+    "numpy>=1.26.4",
+    "scipy>=1.14.0",
 ]
 readme = "README.md"
 keywords = ["ramses"]
