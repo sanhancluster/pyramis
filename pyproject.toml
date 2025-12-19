@@ -10,7 +10,7 @@ authors = [
   {name="San Han", email="san.han@iap.fr"}
 ]
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = {file = "LICENSE"}
 dependencies = [
     "h5py>=3.12.1",
     "numpy>=1.26.4"
