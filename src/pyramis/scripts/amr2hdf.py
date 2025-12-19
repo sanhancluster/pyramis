@@ -10,8 +10,10 @@ from packaging.version import Version
 from typing import Optional, Tuple
 
 from pyramis.utils import Timestamp, hilbert3d_map
-from pyramis import io
+from pyramis import io, get_dim_keys
 import tomllib
+
+io.config['VARIABLE_NAME_GROUP'] = 'native'
 
 
 def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='../hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=True, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8):
@@ -135,7 +137,7 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
             if name == 'sink':
                 if pointer_dict[name] == 0: # we load sink data only once
                     part = io.read_sink(path=path, iout=iout)
-                    hilbert_key = get_hilbert_key(np.asarray([part['x'], part['y'], part['z']]).T, info['nlevelmax'], nthread=nthread)
+                    hilbert_key = get_hilbert_key(np.asarray([part[key] for key in get_dim_keys()]).T, info['nlevelmax'], nthread=nthread)
                     part = part[np.argsort(hilbert_key)] # already Particle class at this point
                 else: # sink data is alrady loaded
                     continue
@@ -154,7 +156,7 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
     
     # ensure the number of particles match the header
     for name in names:
-        if cpu_list.size == info['ncpu'] or name =='sink':
+        if cpu_list_sub.size == info['ncpu'] or name =='sink':
             assert pointer_dict[name] == header[name], f"Number mismatch for {name}: {pointer_dict[name]} != {header[name]}"
     return new_part_dict, pointer_dict
 
@@ -168,7 +170,7 @@ def compute_key_boundaries(key_array: np.ndarray, n_key: int) -> np.ndarray:
     return key_boundaries
 
 
-def create_hdf5_cell(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=True, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8):
+def create_hdf5_cell(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='../hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=True, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8):
     """
     Export cell data from the snapshot to HDF5 format.
     """
@@ -282,7 +284,7 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
     This function will export both particle and cell data.
     """
 
-
+    vname_abbr = io.config['VARIABLE_NAME_ABBREVIATION'][io.config['VARIABLE_NAME_GROUP']]
     iout_avail = io.get_available_snapshots(path, check_data=['amr', 'hydro', 'part', 'grav'], scheduled_only=False)['iout']
     if iout_list is None:
         iout_list = iout_avail
@@ -292,22 +294,23 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
         size_load = info['ncpu']
 
     for iout in tqdm(iout_list, desc=f"Exporting snapshot data", disable=True):
-
+        
+        # remove unnecessary fields per perticle type
         if converted_dtypes_part is None and convert_part:
             converted_dtypes_part = {}
             dtype_part = io.read_part(path, iout, cpulist=[1], read_cpu=True).dtype
             for name in ['star', 'dm', 'cloud', 'tracer']:
                 new_dtype = []
                 for key, fmt in dtype_part.descr:
-                    if name == 'dm' and key in ['metal', 'epoch', 'm0', 'rho0']:
+                    if name == 'dm' and key in [vname_abbr[key] if key in vname_abbr else key for key in ['metallicity', 'birth_time', 'initial_mass', 'birth_density']]:
                         continue
-                    if name == 'cloud' and key in ['metal', 'epoch', 'm0', 'rho0']:
+                    if name == 'cloud' and key in [vname_abbr[key] if key in vname_abbr else key for key in ['metallicity', 'birth_time', 'initial_mass', 'birth_density']]:
                         continue
-                    if name == 'tracer' and key not in ['vx', 'vy', 'vz', 'metal', 'epoch', 'm0', 'rho0']:
+                    if name == 'tracer' and key not in [vname_abbr[key] if key in vname_abbr else key for key in ['velocity_x', 'velocity_y', 'velocity_z', 'metallicity', 'birth_time', 'initial_mass', 'birth_density']]:
                         continue
 
                     dt = np.dtype(fmt)
-                    if dt.kind == 'f' and dt.itemsize == 8 and key not in ['x', 'y', 'z']:
+                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_dim_keys():
                         new_fmt = np.dtype(dt.byteorder + 'f4')
                     else:
                         new_fmt = dt
@@ -320,14 +323,14 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
                     new_dtype.append((key, new_fmt))
                 converted_dtypes_part[name] = new_dtype
             
-            if os.path.exists(io.FILENAME_FORMAT.format(data='sink', iout=iout, icpu=1)):
+            if os.path.exists(io.config['FILENAME_FORMAT'].format(data='sink', iout=iout, icpu=1)):
                 dtype_sink = io.read_sink(path, iout).dtype
                 new_dtype = []
                 for desc in dtype_sink.descr:
                     key = desc[0]
                     fmt = desc[1]
                     dt = np.dtype(fmt)
-                    if dt.kind == 'f' and dt.itemsize == 8 and key not in ['x', 'y', 'z']:
+                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_dim_keys():
                         new_fmt = np.dtype(dt.byteorder + 'f4')
                     else:
                         new_fmt = dt
@@ -341,7 +344,7 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
                 new_dtype = []
                 for key, fmt in dtype_cell.descr:
                     dt = np.dtype(fmt)
-                    if dt.kind == 'f' and dt.itemsize == 8 and key not in ['x', 'y', 'z']:
+                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_dim_keys():
                         new_fmt = np.dtype(dt.byteorder + 'f4')
                     else:
                         new_fmt = dt
@@ -493,7 +496,7 @@ def add_group(fl:h5py.File, name:str, new_data:np.ndarray, levelmin:int, levelma
     timer.message(f"Measuring Hilbert key for {name} data...")
 
     # compute chunk boundaries based on Hilbert key and sort the data accordingly
-    coordinates = np.array([new_data['x'], new_data['y'], new_data['z']]).T
+    coordinates = np.array([new_data[key] for key in get_dim_keys()]).T
     if not part:
         # use level information to compute Hilbert key for cells
         chunk_boundary, hilbert_boundary, sort_key1 = set_hilbert_boundaries(coordinates, new_data['level'], n_chunk, levelmax, part=part, sort=sort)
@@ -619,15 +622,19 @@ def main(args):
 
     n_chunk = args.nchunk if hasattr(args, 'nchunk') else 1000
 
-    size_load = args.load
+    size_load = args.nload
     nthread = args.nthread
+    relative_output_path = args.output
+
+    if 'chunks' in dataset_kw.keys() and isinstance(dataset_kw['chunks'], int):
+        dataset_kw['chunks'] = (dataset_kw['chunks'],)
 
     #iout_list = np.arange(0, snap.iout, 10)[::-1]
     #iout_list = [repo.get_snap(z=z).iout for z in [1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0]][::-1]
     cpu_list = None
     export_snapshots(repo_path, iout_list=iout_list, n_chunk=n_chunk, size_load=size_load,
                      converted_dtypes_part=converted_dtypes_part, converted_dtypes_cell=converted_dtypes_cell,
-                     output_path='hdf', cpu_list=cpu_list, dataset_kw=dataset_kw,
+                     output_path=relative_output_path, cpu_list=cpu_list, dataset_kw=dataset_kw,
                      sim_description=sim_description, sim_publication=sim_publication, version=version, overwrite=overwrite, nthread=nthread, walltime=args.walltime)
 
 
@@ -640,11 +647,12 @@ if __name__ == '__main__':
     parser.add_argument("--verbose", "-v", help='Enable verbose output', action='store_true')
     parser.add_argument("--version", "-vs", help='Version of the output files', type=str, default='1.1')
     parser.add_argument("--overwrite", "-o", help='Overwrite existing output files', action='store_true')
-    parser.add_argument("--load", "-l", help=f'Number of RAMSES files to load at once (default: -1)', type=int, default=-1)
+    parser.add_argument("--nload", "-l", help=f'Number of RAMSES files to load at once (default: -1)', type=int, default=-1)
     parser.add_argument("--nthread", "-t", help=f'Number of threads to use for loading data (default: 1)', type=int, default=1)
     parser.add_argument("--nchunk", "-n", help='Number of chunks to divide the data into (default: 100)', type=int, default=100)
     parser.add_argument("--walltime", "-w", help='Walltime limit (hours) for the job (default: None)', type=float, default=None)
     parser.add_argument("--config", "-c", help='Path to configuration file (default: None)', type=str, default=None)
+    parser.add_argument("--output", "-p", help='Relative output path (default: hdf)', type=str, default='hdf')
 
     args = parser.parse_args()
 
