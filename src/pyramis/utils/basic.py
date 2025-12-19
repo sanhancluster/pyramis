@@ -8,7 +8,7 @@ DEFAULT_N_PROCS = config['DEFAULT_N_PROCS']
 
 def in_jupyter():
     try:
-        from IPython import get_ipython
+        from IPython.core.getipython import get_ipython
         return get_ipython().__class__.__name__ == "ZMQInteractiveShell"
     except:
         return False

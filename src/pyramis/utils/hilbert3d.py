@@ -116,17 +116,17 @@ def _worker_hilbert(args):
 
 def hilbert3d(
     idx,
-    bit_length,
-    levels=None,
-    chunk_size=1000000,
-    n_workers=1,
+    bit_length: int,
+    levels: int | np.ndarray | None=None,
+    chunk_size: int=1000000,
+    n_workers: int=1,
     backend="thread",
 ):
     """
     Vectorized NumPy implementation of the Fortran 'hilbert3d' subroutine.
     Supports single-thread, multithread, and multiprocess execution.
     """
-    idx = np.asarray(idx, dtype=np.int64)
+    idx = np.asarray(idx, dtype=np.int32)
     x = idx[:, 0]
     y = idx[:, 1]
     z = idx[:, 2]
@@ -134,19 +134,19 @@ def hilbert3d(
     n = idx.shape[0]
 
     if levels is None:
-        levels = np.full(n, bit_length, dtype=np.int64)
+        levels = np.full(n, bit_length, dtype=np.int32)
     elif isinstance(levels, numbers.Integral):
-        levels = np.full(n, levels, dtype=np.int64)
+        levels = np.full(n, levels, dtype=np.int32)
     else:
-        levels = np.asarray(levels, dtype=np.int64)
+        levels = np.asarray(levels, dtype=np.int32)
+        if levels.shape[0] != n:
+            raise ValueError("The first dimension of `idx` and `levels` must have the same length.")
 
-    if not (x.shape == y.shape == z.shape == levels.shape):
-        raise ValueError("x, y, z, and levels must have the same length.")
-
+    assert isinstance(levels, np.ndarray)
     if np.any(levels < 0):
-        raise ValueError("bit_length must be non-negative.")
+        raise ValueError("`levels` must be non-negative.")
     if bit_length < 0:
-        raise ValueError("bit_length_max must be non-negative.")
+        raise ValueError("`bit_length` must be non-negative.")
 
     bl_max = int(levels.max(initial=0))
     if bl_max == 0:
@@ -216,7 +216,7 @@ def hilbert3d(
     return order
 
 
-def hilbert3d_map(pos, bit_length: int, levels=None, lims=None, check_bounds=True, kwargs_hilbert3d={}):
+def hilbert3d_map(pos: np.ndarray, bit_length: int, levels: int | np.ndarray | None=None, lims=None, check_bounds=True, kwargs_hilbert3d={}):
     """
     Position-based Hilbert curve mapping.
     This function maps 3D positions to Hilbert curve indices based on the specified levels and bit length.

@@ -3,7 +3,6 @@ import h5py
 import numpy as np
 
 from concurrent.futures import as_completed
-
 import warnings
 
 from . import config
@@ -13,8 +12,6 @@ from .utils.arrayview import SharedView
 from .utils import get_mp_executor
 from. import io
 
-import numpy as np
-import h5py
 from multiprocessing.shared_memory import SharedMemory
 from multiprocessing import get_context
 
@@ -22,7 +19,7 @@ DEFAULT_N_PROCS = config['DEFAULT_N_PROCS']
 DIM_KEYS = config['DIM_KEYS']
 FILENAME_FORMAT_HDF: str = config['FILENAME_FORMAT_HDF']
 
-def get_by_type(obj, name:str, datatype: type | None=None):
+def get_by_type(obj: h5py.File | h5py.Group, name:str, datatype=None):
     data = obj.get(name)
     if datatype is not None:
         assert isinstance(data, datatype), f"{name} is not of type {datatype}"
@@ -133,11 +130,11 @@ def _chunk_slice_hdf_mp(
     # Read only meta-info once in the parent
     with h5py.File(path, "r") as f:
         group = f[group_name]
-        data = group["data"]
+        data = get_by_type(group, "data", h5py.Dataset)
         if target_fields is not None:
             data = data.fields(target_fields)
 
-        bounds = group[boundary_name][:]
+        bounds = get_by_type(group, boundary_name, h5py.Dataset)[:]
         dtype = data.dtype
     
     if target_fields is not None:

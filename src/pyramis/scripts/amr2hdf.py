@@ -9,12 +9,7 @@ import argparse
 from packaging.version import Version
 from typing import Optional, Tuple
 
-from rur import uri, utool
-from rur.fortranfile import FortranFile
-from rur.scripts.san import simulations as sim
-from rur.utool import hilbert3d_map
-from pyramis.utils import Timestamp
-# from rur.hilbert3d import hilbert3d
+from pyramis.utils import Timestamp, hilbert3d_map
 from pyramis import io
 import tomllib
 
@@ -117,6 +112,7 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
         if header[name] == 0:
             continue
         new_dtypes = converted_dtypes[name]
+        new_dtypes = [tuple(d) for d in new_dtypes]
         new_part_dict[name] = np.empty(header[name], dtype=new_dtypes)
         pointer_dict[name] = 0
 
@@ -132,21 +128,6 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
 
         if part_data is None:
             raise ValueError("Particle not loaded in snapshot")
-
-        """
-        for icpu in cpu_list_sub:
-            # sort the particle within each CPU by Hilbert key, this is to reduce the sorting time later
-            idx = np.where(np.isin(snap.cpulist_part, [icpu], assume_unique=True))[0][0]
-            bound = snap.bound_part[idx], snap.bound_part[idx+1]
-            if bound[0] == bound[1]:
-                continue
-            sl = slice(*bound)
-            part_sl = part_data[sl]
-            sl_coo = np.asarray([part_sl['x'], part_sl['y'], part_sl['z']]).T
-            hilbert_key = get_hilbert_key(sl_coo, snap.levelmax, nthread=nthread)
-            sort_key = np.argsort(hilbert_key)
-            part_data[sl] = part_data[sl][sort_key]
-        """
         
         for name in names:
             new_part = new_part_dict[name]
@@ -274,9 +255,9 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
     timer.message(f"Calculating total number of cells for iout = {iout} with {len(cpu_list)} CPUs...")
     n_cell = np.sum(io.read_ncell_per_cpu(path, iout, cpulist=cpu_list, read_branch=read_branch))
 
-    #n_cell = get_ncell(snap, python=True, read_branch=read_branch)
-    new_cell = np.empty(n_cell, dtype=converted_dtypes)
-    new_dtypes = converted_dtypes
+    new_dtypes = [tuple(d) for d in converted_dtypes]
+    new_cell = np.empty(n_cell, dtype=new_dtypes)
+
     # sub-load cell data
     idx_array = np.arange(len(cpu_list))[::size_load]
     for idx in idx_array:
@@ -285,20 +266,7 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
         if len(cpu_list_sub) == 0:
             continue
         cell_data = io.read_cell(path=path, iout=iout, cpulist=cpu_list_sub, read_branch=read_branch, read_hydro=True, read_grav=True, read_cpu=True, n_workers=nthread)
-        """
-        for icpu in cpu_list_sub:
-            # sort the cell within each CPU by Hilbert key, this is to reduce the sorting time later
-            idx = np.where(np.isin(snap.cpulist_cell, [icpu], assume_unique=True))[0][0]
-            bound = snap.bound_cell[idx], snap.bound_cell[idx+1]
-            if bound[0] == bound[1]:
-                continue
-            sl = slice(*bound)
-            cell_sl = cell_data[sl]
-            sl_coo = np.array([cell_sl['x'], cell_sl['y'], cell_sl['z']]).T
-            hilbert_key = get_hilbert_key(sl_coo, snap.levelmax, cell_sl['level'], nthread=nthread)
-            sort_key = np.argsort(hilbert_key)
-            cell_data[sl] = cell_data[sl][sort_key]
-        """
+
         timer.message(f"Exporting cell data with {cell_data.size} cells..."
               f"\nItem size: {cell_data.dtype.itemsize} -> {new_cell.dtype.itemsize} B ({new_cell.dtype.itemsize / cell_data.dtype.itemsize * 100:.2f}%)")
         for field in new_dtypes:
@@ -306,56 +274,6 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
         pointer += cell_data.size
         del cell_data
     return new_cell, pointer
-
-
-def get_ncell(snap, python=False, read_branch=False) -> int:
-    """
-    Get the total number of cells in the snapshot.
-    """
-    if not python:
-        ncell_table = snap.get_ncell(np.arange(1, snap.ncpu + 1))
-        ncell = np.sum(ncell_table)
-    else:
-        ncpu = snap.ncpu
-        ndim = snap.ndim
-        twotondim = 2 ** ndim
-        skip_amr = 3 * (2 ** ndim + ndim) + 1
-        nlevelmax = snap.levelmax
-
-        ncell = 0
-        for icpu in range(1, ncpu + 1):
-            fname = snap.get_path('amr', icpu)
-            with FortranFile(fname, mode='r') as f:
-                f.skip_records(5)
-                nboundary, = f.read_ints()
-                f.skip_records(15)
-                numbl = f.read_ints()
-                f.skip_records(3)
-
-                if(nboundary>0):
-                    numbb = f.read_ints()
-                    f.skip_records(2)
-                ngridfile = np.empty((ncpu + nboundary, nlevelmax), dtype='i4')
-                for ilevel in range(nlevelmax):
-                    ngridfile[:ncpu, ilevel] = numbl[ncpu * ilevel: ncpu * (ilevel + 1)]
-                    if(nboundary>0):
-                        ngridfile[ncpu:ncpu+nboundary, ilevel]=numbb[nboundary*ilevel : nboundary*(ilevel+1)]
-                f.skip_records(4)
-                levels, cpus = np.where(ngridfile.T > 0)
-                for ilevel, jcpu in zip(levels, cpus + 1):
-                    f.skip_records(3)
-                    if jcpu == icpu:
-                        f.skip_records(3 * ndim + 1)
-                        for _ in range(twotondim):
-                            son = f.read_ints()
-                            if not read_branch:
-                                ncell += len(son.flatten()) - np.count_nonzero(son)
-                            else:
-                                ncell += np.count_nonzero(son)
-                        f.skip_records(2 * twotondim)
-                    else:
-                        f.skip_records(skip_amr)
-    return ncell
 
 
 def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=None, converted_dtypes_cell=None, output_path:str='../hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=True, sim_description:str='', sim_publication:str='', version:str='1.0', nthread:int=8, walltime=None, convert_part=True, convert_cell=True):
@@ -405,7 +323,9 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
             if os.path.exists(io.FILENAME_FORMAT.format(data='sink', iout=iout, icpu=1)):
                 dtype_sink = io.read_sink(path, iout).dtype
                 new_dtype = []
-                for key, fmt in dtype_sink.descr:
+                for desc in dtype_sink.descr:
+                    key = desc[0]
+                    fmt = desc[1]
                     dt = np.dtype(fmt)
                     if dt.kind == 'f' and dt.itemsize == 8 and key not in ['x', 'y', 'z']:
                         new_fmt = np.dtype(dt.byteorder + 'f4')
@@ -440,12 +360,12 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
             timer.message(f"Snapshot iout = {iout} not available or missing data. Skipping.")
             continue
         # Start exporting cell and particle data for each snapshot
-        if convert_part:
+        if convert_part and converted_dtypes_part is not None:
             timer.start(f"Starting particle data extraction for iout = {iout}.", name='part_hdf')
             create_hdf5_part(path, iout, n_chunk=n_chunk, size_load=size_load, converted_dtypes=converted_dtypes_part, output_path=output_path, cpu_list=cpu_list, dataset_kw=dataset_kw, overwrite=overwrite, sim_description=sim_description, sim_publication=sim_publication, version=version, nthread=nthread)
             timer.record(f"Particle data extraction completed for iout = {iout}.", name='part_hdf')
         
-        if convert_cell:
+        if convert_cell and converted_dtypes_cell is not None:
             timer.start(f"Starting cell data extraction for iout = {iout}.", name='cell_hdf')
             create_hdf5_cell(path, iout, n_chunk=n_chunk, size_load=size_load, converted_dtypes=converted_dtypes_cell['cell'], output_path=output_path, cpu_list=cpu_list, dataset_kw=dataset_kw, overwrite=overwrite, sim_description=sim_description, sim_publication=sim_publication, version=version, nthread=nthread)
             timer.record(f"Cell data extraction completed for iout = {iout}.", name='cell_hdf')
@@ -537,7 +457,8 @@ def add_attr_with_descr(fl: h5py.File, key: str, value, description: str):
     fl.attrs[key] = value
     if 'attributes' not in fl.attrs:
         fl.attrs['attributes'] = "This file includes the following attributes:"
-    fl.attrs['attributes'] += f"\n'{key}': {description}"
+    current_attrs = str(fl.attrs['attributes'])
+    fl.attrs['attributes'] = current_attrs + f"\n'{key}': {description}"
 
 def write_dataset(group:h5py.Group, dataset_name:str, data:np.ndarray, sort_key=None, mem_block_bytes=1000 * 1024**2, **dataset_kw):
     """
@@ -581,7 +502,9 @@ def add_group(fl:h5py.File, name:str, new_data:np.ndarray, levelmin:int, levelma
         chunk_boundary, hilbert_boundary, sort_key1 = set_hilbert_boundaries(coordinates, None, n_chunk, levelmax, part=part, sort=sort)
 
     level_boundary = None
-    if 'level' in new_data.dtype.names:
+    if new_data.dtype.names is None:
+        raise ValueError("Data must be a structured array with named fields.")
+    elif 'level' in new_data.dtype.names:
         # compute level boundaries within each chunk and sort the data accordingly
         levels = np.take(new_data['level'], sort_key1)
         level_boundary, sort_key2 = set_level_boundaries(levels, chunk_boundary, n_chunk, n_level)
@@ -592,10 +515,9 @@ def add_group(fl:h5py.File, name:str, new_data:np.ndarray, levelmin:int, levelma
     else:
         sort_key = sort_key1
 
-    if name not in fl:
-        grp = fl.create_group(name)
-    else:
-        grp = fl[name]
+    if name in fl:
+        del fl[name]
+    grp = fl.create_group(name)
     grp.attrs['name'] = name
     grp.attrs['size'] = new_data.size
 

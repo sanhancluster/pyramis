@@ -1,14 +1,9 @@
 
-import multiprocessing as mp
 from multiprocessing.shared_memory import SharedMemory
 
 import numpy as np
 from typing import Optional
 from .basic import in_jupyter
-
-import numpy as np
-from typing import Optional
-from multiprocessing.shared_memory import SharedMemory
 
 
 class SharedArray(np.ndarray):
