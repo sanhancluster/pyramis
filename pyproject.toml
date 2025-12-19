@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyramis"
-version = "0.1.1"
+version = "0.1.4"
 description = "A python-based ramses analyzer for minimalist"
 authors = [
   {name="San Han", email="san.han@iap.fr"}
@@ -19,7 +19,11 @@ readme = "README.md"
 keywords = ["ramses"]
 
 [tool.setuptools]
+include-package-data = true
 package-dir = {"" = "src"}
+
+[tool.setuptools.package-data]
+pyramis = ["*.toml"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

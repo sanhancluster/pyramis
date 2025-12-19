@@ -1,11 +1,8 @@
 import pyramis.io as io
 import pyramis.hdf as hdf
 import pyramis.core as core
-import numpy as np
 import time
-from rur import uri
 from pyramis import get_cosmo_table, cosmo_convert
-from matplotlib import pyplot as plt
 import pyramis
 import h5py
 import os
