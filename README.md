@@ -6,10 +6,6 @@ A minimalist version of [Ramses Univsersal Reader](https://github.com/sanhanclus
 ```bash
 pip install pyramis
 ```
-### Using conda
-```bash
-conda install -c conda-forge pyramis
-```
 
 ## How to use
 ### Reading the particle data
