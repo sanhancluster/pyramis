@@ -1,7 +1,5 @@
 import numpy as np
-from . import config
-
-DIM_KEYS = config['DIM_KEYS']
+from . import config, get_dim_keys
 
 class Region():
     def evaluate(self, data):
@@ -64,7 +62,7 @@ class Box(Region):
         half_size = np.asarray(size / 2)
 
         mask = np.ones(len(data), dtype=bool)
-        for i, key in enumerate(DIM_KEYS):
+        for i, key in enumerate(get_dim_keys()):
             mask &= (box[i, 0] <= data[key] + half_size) & (data[key] - half_size <= box[i, 1])
         return mask
 
@@ -98,7 +96,7 @@ class Sphere(Region):
         radius = self.radius
 
         dist2 = np.zeros(len(data), dtype=float)
-        for i, key in enumerate(DIM_KEYS):
+        for i, key in enumerate(get_dim_keys()):
             dist2 += (data[key] - center[i])**2
         mask = np.sqrt(dist2) <= radius - size
         return mask
@@ -132,7 +130,7 @@ class Spheroid(Region):
         radii = self.radii
         
         dist2 = np.zeros(len(data), dtype=float)
-        for i, key in enumerate(DIM_KEYS):
+        for i, key in enumerate(get_dim_keys()):
             normed = (data[key] - center[i]) / (radii[i] - size)
             dist2 += normed**2
         mask = dist2 <= 1

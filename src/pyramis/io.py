@@ -9,7 +9,7 @@ from concurrent.futures import as_completed
 import configparser
 
 import re
-from . import config, get_position, get_velocity, get_cosmo_table, cosmo_convert
+from . import config, get_dim_keys, get_position, get_velocity, get_cosmo_table, cosmo_convert
 from .core import compute_chunk_list_from_hilbert, str_to_tuple, quad_to_f16
 from pyramis.geometry import Region, Box
 from .utils.fortranfile import FortranFile
@@ -21,31 +21,9 @@ import h5py
 from multiprocessing.shared_memory import SharedMemory
 from itertools import repeat
 
-DEFAULT_N_PROCS: int = config['DEFAULT_N_PROCS']
-OUTPUT_FORMAT: str = config['OUTPUT_FORMAT']
-OUTPUT_FORMAT_ANY: str = config['OUTPUT_FORMAT_ANY']
-FILENAME_FORMAT: str = config['FILENAME_FORMAT']
-FILENAME_FORMAT_ANY: str = config['FILENAME_FORMAT_ANY']
-NAMELIST_FILENAME: str = config['NAMELIST_FILENAME']
-VNAME_ABBR: dict = config['VARIABLE_NAME_ABBREVIATION']
-PARTICLE_TYPE_DEFINITION: dict = config['PARTICLE_TYPE_DEFINITION']
-FILE_DESCRIPTOR_FORMAT: str = config['FILE_DESCRIPTOR_FORMAT']
-DIM_KEYS: list = config['DIM_KEYS']
-
-OCT_OFFSET = np.array([
-    [-0.5, -0.5, -0.5],
-    [ 0.5, -0.5, -0.5],
-    [-0.5,  0.5, -0.5],
-    [ 0.5,  0.5, -0.5],
-    [-0.5, -0.5,  0.5],
-    [ 0.5, -0.5,  0.5],
-    [-0.5,  0.5,  0.5],
-    [ 0.5,  0.5,  0.5],
-])
-
 
 def get_available_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missing=False, scheduled_only=False, namelist_path=None, scale_threshold=5.) -> np.ndarray:
-    pattern = os.path.join(path, OUTPUT_FORMAT_ANY)
+    pattern = os.path.join(path, config['OUTPUT_FORMAT_ANY'])
     dirs = glob.glob(pattern)
     iout_list = []
     aexp_list = []
@@ -65,7 +43,7 @@ def get_available_snapshots(path: str, check_data=['amr', 'hydro', 'part'], repo
         info = parse_info(info_path)
 
         for data in check_data:
-            file_pattern = os.path.join(d, FILENAME_FORMAT_ANY.format(data=data, iout=iout))
+            file_pattern = os.path.join(d, config['FILENAME_FORMAT_ANY'].format(data=data, iout=iout))
             files = glob.glob(file_pattern)
             if len(files) != info['ncpu']:
                 if report_missing:
@@ -92,7 +70,7 @@ def get_available_snapshots(path: str, check_data=['amr', 'hydro', 'part'], repo
 
         if 'aout' not in info and 'tout' not in info:
             if namelist_path is None:
-                namelist_path = os.path.join(path, OUTPUT_FORMAT.format(iout=iout_check), NAMELIST_FILENAME)
+                namelist_path = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout_check), config['NAMELIST_FILENAME'])
             nml = parse_namelist(namelist_path)
 
             scheduled = np.zeros(len(table), dtype=bool)
@@ -132,16 +110,17 @@ def get_available_snapshots(path: str, check_data=['amr', 'hydro', 'part'], repo
 
 
 def read_type_descriptor(path: str, iout: int, data: str='part') -> np.dtype:
-    fd_path = os.path.join(path, OUTPUT_FORMAT.format(iout=iout), FILE_DESCRIPTOR_FORMAT.format(data=data))
+    fd_path = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILE_DESCRIPTOR_FORMAT'].format(data=data))
     if not os.path.exists(fd_path):
         raise FileNotFoundError(f"File descriptor not found: {fd_path}")
     fd = np.genfromtxt(fd_path, delimiter=",", names=True, dtype=None, encoding="utf-8", skip_header=1, autostrip=True)
     data_dtype = []
     for p in fd:
         vname = p['variable_name']
-        if vname in VNAME_ABBR.keys():
-            vname = VNAME_ABBR[vname]
-        data_dtype.append((vname, p['variable_type']))
+        vname_abbr = config['VARIABLE_NAME_ABBREVIATION'][config['VARIABLE_NAME_GROUP']]
+        if vname in vname_abbr.keys():
+            vname = vname_abbr[vname]
+        data_dtype.append((str(vname), p['variable_type']))
     return np.dtype(data_dtype)
 
 
@@ -202,11 +181,11 @@ def parse_namelist(filename):
 
 
 def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None, read_amr=True, read_hydro=True) -> dict:
-    info = parse_info(os.path.join(output_path, OUTPUT_FORMAT.format(iout=iout), f'info_{iout:05d}.txt'))
+    info = parse_info(os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), f'info_{iout:05d}.txt'))
     info['iout'] = iout
 
     if read_amr:
-        amr_files = glob.glob(os.path.join(output_path, OUTPUT_FORMAT.format(iout=iout), FILENAME_FORMAT_ANY.format(data='amr', iout=iout)))
+        amr_files = glob.glob(os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_ANY'].format(data='amr', iout=iout)))
         if len(amr_files) == 0:
             raise FileNotFoundError(f"No AMR file found at iout = {iout} in {output_path}.")
 
@@ -252,11 +231,11 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
                     coarse_min[i] += 1
                 if nxyz[i] == 2:
                     if namelist_path is None:
-                        namelist_path = os.path.join(output_path, NAMELIST_FILENAME)
+                        namelist_path = os.path.join(output_path, config['NAMELIST_FILENAME'])
                     nml = parse_namelist(namelist_path)
                     if len(nml) == 0:
                         warnings.warn(f"Assymetric boundaries detected, which cannot be determined without namelist file. \
-                                        Move {NAMELIST_FILENAME} file to the output directory or manually apply offset to the cell position.")
+                                        Move {config['NAMELIST_FILENAME']} file to the output directory or manually apply offset to the cell position.")
                     else:
                         bound_min = np.array(str_to_tuple(nml['BOUNDARY_PARAMS']['%sbound_min' % key[i]]))
                         bound_max = np.array(str_to_tuple(nml['BOUNDARY_PARAMS']['%sbound_max' % key[i]]))
@@ -270,7 +249,7 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
         info['kcoarse_min'] = coarse_min[2]
 
     if read_hydro:
-        hydro_files = glob.glob(os.path.join(output_path, OUTPUT_FORMAT.format(iout=iout), FILENAME_FORMAT_ANY.format(data='hydro', iout=iout)))
+        hydro_files = glob.glob(os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_ANY'].format(data='hydro', iout=iout)))
         if len(hydro_files) > 0:
             hydro_path = hydro_files[0]
             with FortranFile(hydro_path, mode='r') as f:
@@ -301,7 +280,7 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
 
 
 def get_data_path(data_name, path, iout, icpu):
-    return os.path.join(path, OUTPUT_FORMAT.format(iout=iout), FILENAME_FORMAT.format(data=data_name, iout=iout, icpu=icpu))
+    return os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT'].format(data=data_name, iout=iout, icpu=icpu))
 
 def _read_npart_file(path, iout, icpu, part_type, family_exists, is_star):
     filename = get_data_path('part', path, iout, icpu)
@@ -337,7 +316,7 @@ def _read_npart_file(path, iout, icpu, part_type, family_exists, is_star):
 
 
 def read_npart_header(path, iout):
-    filename = os.path.join(path, OUTPUT_FORMAT.format(iout=iout), f'header_{iout:05d}.txt')
+    filename = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), f'header_{iout:05d}.txt')
     family_counts = {}
 
     with open(filename, "r") as f:
@@ -356,10 +335,11 @@ def read_npart_header(path, iout):
                 family_counts[family] = count
     
     # add tracer count
-    family_counts['tracer'] = 0
+    tracer_counts = 0
     for key in family_counts.keys():
         if 'tracer' in key:
-            family_counts['tracer'] += family_counts[key]
+            tracer_counts += family_counts[key]
+    family_counts['tracer'] = tracer_counts
 
     return family_counts
 
@@ -400,7 +380,7 @@ def mask_by_part_type(part, part_type):
     names = part.dtype.names
     if ('family' in names):
         # Do a family-based classification
-        mask = np.isin(part['family'], PARTICLE_TYPE_DEFINITION[part_type])
+        mask = np.isin(part['family'], config['PARTICLE_TYPE_DEFINITION'][part_type])
     elif ('tform' in names):
         # Do a parameter-based classification
         if (part_type == 'dm'):
@@ -441,7 +421,7 @@ def read_part(
     info: dict | None = None,
     read_cpu=False,
     exact_cut: Literal[False] = False,
-    n_workers: int=DEFAULT_N_PROCS,
+    n_workers: int=config['DEFAULT_N_PROCS'],
     use_process: Literal[True] = True,
     copy_result: Literal[False] = False) -> SharedView: ...
 
@@ -457,7 +437,7 @@ def read_part(
     info: dict | None = None,
     read_cpu=False,
     exact_cut: bool=True,
-    n_workers: int=DEFAULT_N_PROCS,
+    n_workers: int=config['DEFAULT_N_PROCS'],
     use_process: bool = False,
     copy_result: bool = True) -> np.ndarray: ...
 
@@ -472,7 +452,7 @@ def read_part(
         info: dict | None = None,
         read_cpu=False,
         exact_cut: bool=True,
-        n_workers: int=DEFAULT_N_PROCS,
+        n_workers: int=config['DEFAULT_N_PROCS'],
         use_process: bool=False,
         copy_result: bool=True) -> np.ndarray | SharedView:
 
@@ -487,12 +467,12 @@ def read_part(
     else:
         mp_backend = "thread"
 
-    output_dir = os.path.join(path, OUTPUT_FORMAT.format(iout=iout))
+    output_dir = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout))
     if dtype is None:
         try:
             dtype = read_type_descriptor(path, iout, 'part')
         except FileNotFoundError as e:
-            fd_path = os.path.join(output_dir, FILE_DESCRIPTOR_FORMAT.format(data='part'))
+            fd_path = os.path.join(output_dir, config['FILE_DESCRIPTOR_FORMAT'].format(data='part'))
             raise FileNotFoundError(
                 f"File descriptor not found: {fd_path}\n"
                 f"`dtype` may need to be provided manually.")
@@ -575,7 +555,7 @@ def read_part(
 def _load_part_file(icpu, output_arr, path, iout, dtype_read, part_type=None):
 
     dtype_out = output_arr.dtype
-    filename = os.path.join(path, OUTPUT_FORMAT.format(iout=iout), FILENAME_FORMAT.format(data='part', iout=iout, icpu=icpu))
+    filename = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT'].format(data='part', iout=iout, icpu=icpu))
 
     with FortranFile(filename, mode="r") as f:
         f.skip_records(2)
@@ -632,7 +612,7 @@ def read_ncell_per_cpu(path, iout, cpulist=None, info=None, read_branch=False) -
 
     ncell_cpu = []
     for icpu in cpulist:
-        filename = os.path.join(path, OUTPUT_FORMAT.format(iout=iout), FILENAME_FORMAT.format(data='amr', iout=iout, icpu=icpu))
+        filename = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT'].format(data='amr', iout=iout, icpu=icpu))
         ngridfile = np.empty((nlevelmax, ncpu + nboundary), dtype=np.int32)
         ncell = 0
         with FortranFile(filename, mode='r') as f:
@@ -681,7 +661,7 @@ def read_cell(
     read_cpu: bool = False,
     read_branch: bool = False,
     exact_cut: Literal[False] = False,
-    n_workers: int = DEFAULT_N_PROCS,
+    n_workers: int = config['DEFAULT_N_PROCS'],
     use_process: Literal[True] = True,
     copy_result: Literal[False] = False,
 ) -> SharedView: ...
@@ -700,7 +680,7 @@ def read_cell(
     read_cpu: bool = False,
     read_branch: bool = False,
     exact_cut: bool=True,
-    n_workers: int = DEFAULT_N_PROCS,
+    n_workers: int = config['DEFAULT_N_PROCS'],
     use_process: bool = False,
     copy_result: bool = True,
 ) -> np.ndarray: ...
@@ -718,7 +698,7 @@ def read_cell(
         read_cpu=False,
         read_branch=False,
         exact_cut: bool=True,
-        n_workers: int=DEFAULT_N_PROCS,
+        n_workers: int=config['DEFAULT_N_PROCS'],
         use_process: bool=False,
         copy_result: bool=True) -> np.ndarray | SharedView:
     
@@ -733,8 +713,8 @@ def read_cell(
     else:
         mp_backend = "thread"
 
-    output_name = os.path.join(path, OUTPUT_FORMAT.format(iout=iout))
-    fd_path = os.path.join(output_name, FILE_DESCRIPTOR_FORMAT.format(data='hydro'))
+    output_name = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout))
+    fd_path = os.path.join(output_name, config['FILE_DESCRIPTOR_FORMAT'].format(data='hydro'))
     if dtype is None:
         try:
             dtype = read_type_descriptor(path, iout, 'hydro')
@@ -745,14 +725,14 @@ def read_cell(
 
     dtype = np.dtype(dtype)
 
-    dim_dtype = [(key, np.float64) for key in DIM_KEYS[:info['ndim']]]
+    dim_dtype = [(key, np.float64) for key in get_dim_keys()[:info['ndim']]]
     dtype_out = np.dtype(dim_dtype + [('level', np.int32)])
 
     if read_hydro:
         dtype_out = np.dtype(dtype_out.descr + dtype.descr)
     
     if read_grav:
-        dtype_out = np.dtype(dtype_out.descr + [('phi', np.float64)])
+        dtype_out = np.dtype(dtype_out.descr + [(config['VARIABLE_NAME_ABBREVIATION'][config['VARIABLE_NAME_GROUP']]['phi'], np.float64)])
     
     if read_cpu:
         dtype_out = np.dtype(dtype_out.descr + [('cpu', np.int32)])
@@ -812,6 +792,16 @@ def read_cell(
     return result
 
 def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, read_grav=False, read_branch=False, info=None):
+    OCT_OFFSET = np.array([
+        [-0.5, -0.5, -0.5],
+        [ 0.5, -0.5, -0.5],
+        [-0.5,  0.5, -0.5],
+        [ 0.5,  0.5, -0.5],
+        [-0.5, -0.5,  0.5],
+        [ 0.5, -0.5,  0.5],
+        [-0.5,  0.5,  0.5],
+        [ 0.5,  0.5,  0.5],
+    ])
 
     if info is None:
         info = get_info(path, iout)
@@ -836,9 +826,9 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
 
     mask_hvar = np.isin(dtype_hydro.names, dtype_out.names)
 
-    filename_amr = os.path.join(path, OUTPUT_FORMAT.format(iout=iout), FILENAME_FORMAT.format(data='amr', iout=iout, icpu=icpu))
-    filename_hydro = os.path.join(path, OUTPUT_FORMAT.format(iout=iout), FILENAME_FORMAT.format(data='hydro', iout=iout, icpu=icpu))
-    filename_grav = os.path.join(path, OUTPUT_FORMAT.format(iout=iout), FILENAME_FORMAT.format(data='grav', iout=iout, icpu=icpu))
+    filename_amr = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT'].format(data='amr', iout=iout, icpu=icpu))
+    filename_hydro = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT'].format(data='hydro', iout=iout, icpu=icpu))
+    filename_grav = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT'].format(data='grav', iout=iout, icpu=icpu))
 
     cursor = 0
 
@@ -868,8 +858,9 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
                 f_amr.skip_records(3)
 
                 pos = [] # list of position arrays
+                dim_keys = get_dim_keys()
                 for idim in range(ndim):
-                    if DIM_KEYS[idim] in dtype_out.names:
+                    if dim_keys[idim] in dtype_out.names:
                         p = f_amr.read_reals(np.float64)
                         pos.append((p + oct_offset_local[:, idim] / 2**ilevel - coarse_min[idim]) * boxlen)
                     else:
@@ -891,7 +882,7 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
                 nread_arr[ilevel - 1] = np.sum(ok, axis=1)
 
                 for idim in range(ndim):
-                    key = DIM_KEYS[idim]
+                    key = get_dim_keys()[idim]
                     if key in dtype_out.names:
                         output_arr[cursor:cursor + nread][key] = pos[idim][iread, jread]
                 if 'level' in dtype_out.names:
@@ -923,36 +914,38 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
                         cursor += nread_oct
                 f_hydro.skip_records(2 * ncpu_after + skip_hydro * nloop_after)
     
-    if read_grav and 'phi' in dtype_out.names:
-        cursor = 0
-        with FortranFile(filename_grav, mode='r') as f_grav:
-            f_grav.skip_records(1)
-            ndim1, = f_grav.read_ints()
-            f_grav.skip_records(2)
+    if read_grav:
+        phi_name = config['VARIABLE_NAME_ABBREVIATION'][config['VARIABLE_NAME_GROUP']]['phi']
+        if phi_name in dtype_out.names:
+            cursor = 0
+            with FortranFile(filename_grav, mode='r') as f_grav:
+                f_grav.skip_records(1)
+                ndim1, = f_grav.read_ints()
+                f_grav.skip_records(2)
 
-            output_particle_density = ndim1 == ndim + 2
-            skip_grav = twotondim * (2 + ndim) if output_particle_density else twotondim * (1 + ndim)
+                output_particle_density = ndim1 == ndim + 2
+                skip_grav = twotondim * (2 + ndim) if output_particle_density else twotondim * (1 + ndim)
 
-            for ilevel in range(1, nlevelmax + 1):
-                nloop_before = np.count_nonzero(ngridfile[ilevel - 1, :icpu - 1])
-                nloop_after = np.count_nonzero(ngridfile[ilevel - 1, icpu:])
-                ncache = ngridfile[ilevel - 1, icpu - 1]
+                for ilevel in range(1, nlevelmax + 1):
+                    nloop_before = np.count_nonzero(ngridfile[ilevel - 1, :icpu - 1])
+                    nloop_after = np.count_nonzero(ngridfile[ilevel - 1, icpu:])
+                    ncache = ngridfile[ilevel - 1, icpu - 1]
 
-                f_grav.skip_records(2 * ncpu_before + skip_grav * nloop_before + 2)
-                if ncache > 0:
-                    for ioct in range(twotondim):
-                        nread_oct = nread_arr[ilevel - 1, ioct]
-                        jread_oct = jread_arr[cursor:cursor + nread_oct]
-                        if output_particle_density:
-                            f_grav.skip_records(1)
-                        if nread_oct > 0:
-                            var = f_grav.read_reals()
-                            output_arr[cursor:cursor + nread_oct]['phi'] = var[jread_oct]
-                            cursor += nread_oct
-                            f_grav.skip_records(ndim)
-                        else:
-                            f_grav.skip_records(1 + ndim)
-                f_grav.skip_records(2 * ncpu_after + skip_grav * nloop_after)
+                    f_grav.skip_records(2 * ncpu_before + skip_grav * nloop_before + 2)
+                    if ncache > 0:
+                        for ioct in range(twotondim):
+                            nread_oct = nread_arr[ilevel - 1, ioct]
+                            jread_oct = jread_arr[cursor:cursor + nread_oct]
+                            if output_particle_density:
+                                f_grav.skip_records(1)
+                            if nread_oct > 0:
+                                var = f_grav.read_reals()
+                                output_arr[cursor:cursor + nread_oct][phi_name] = var[jread_oct]
+                                cursor += nread_oct
+                                f_grav.skip_records(ndim)
+                            else:
+                                f_grav.skip_records(1 + ndim)
+                    f_grav.skip_records(2 * ncpu_after + skip_grav * nloop_after)
 
 
 def _read_cpulist(
@@ -1103,12 +1096,12 @@ def read_sink(
     if info is None:
         info = get_info(path, iout)
 
-    output_dir = os.path.join(path, OUTPUT_FORMAT.format(iout=iout))
+    output_dir = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout))
     if dtype is None:
         try:
             dtype = read_type_descriptor(path, iout, 'sink')
         except FileNotFoundError as e:
-            fd_path = os.path.join(output_dir, FILE_DESCRIPTOR_FORMAT.format(data='sink'))
+            fd_path = os.path.join(output_dir, config['FILE_DESCRIPTOR_FORMAT'].format(data='sink'))
             raise FileNotFoundError(
                 f"File descriptor not found: {fd_path}\n"
                 f"`dtype` may need to be provided manually.")
@@ -1120,12 +1113,12 @@ def read_sink(
         dtype_out = np.dtype([(name, dtype_out.fields[name][0]) for name in target_fields if name in dtype_out.names])
     
     if icpu is None:
-        sink_files = glob.glob(os.path.join(path, OUTPUT_FORMAT.format(iout=iout), FILENAME_FORMAT_ANY.format(data='sink', iout=iout)))
+        sink_files = glob.glob(os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_ANY'].format(data='sink', iout=iout)))
         if len(sink_files) == 0:
             return np.empty(0, dtype=dtype_out)
         filename = sink_files[0]
     else:
-        filename = os.path.join(path, OUTPUT_FORMAT.format(iout=iout), FILENAME_FORMAT.format(data='sink', iout=iout, icpu=icpu))
+        filename = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT'].format(data='sink', iout=iout, icpu=icpu))
         if not os.path.exists(filename):
             return np.empty(0, dtype=dtype_out)
 

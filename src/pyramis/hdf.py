@@ -5,7 +5,7 @@ import numpy as np
 from concurrent.futures import as_completed
 import warnings
 
-from . import config
+from . import config, get_dim_keys
 from .core import compute_chunk_list_from_hilbert
 from .geometry import Region, Box
 from .utils.arrayview import SharedView
@@ -13,11 +13,6 @@ from .utils import get_mp_executor
 from. import io
 
 from multiprocessing.shared_memory import SharedMemory
-from multiprocessing import get_context
-
-DEFAULT_N_PROCS = config['DEFAULT_N_PROCS']
-DIM_KEYS = config['DIM_KEYS']
-FILENAME_FORMAT_HDF: str = config['FILENAME_FORMAT_HDF']
 
 def get_by_type(obj: h5py.File | h5py.Group, name:str, datatype=None):
     data = obj.get(name)
@@ -38,7 +33,7 @@ def _chunk_size_worker(
             
         data = get_by_type(group, 'data', h5py.Dataset)
 
-        fields = DIM_KEYS
+        fields = get_dim_keys()
         if is_cell:
             fields = fields + ['level']
 
@@ -115,7 +110,7 @@ def _chunk_slice_hdf_mp(
     region: Region | None=None,
     boundary_name="chunk_boundary",
     target_fields=None,
-    n_workers=DEFAULT_N_PROCS,
+    n_workers=config['DEFAULT_N_PROCS'],
     mp_backend="process",
     copy_result=True,
     is_cell=False
@@ -272,7 +267,7 @@ def read_hdf(
         levelmax=None, 
         levelmin=None,
         exact_cut=True,
-        n_workers=DEFAULT_N_PROCS,
+        n_workers=config['DEFAULT_N_PROCS'],
         use_process=True,
         copy_result=True,
         is_cell=False):
@@ -343,11 +338,11 @@ def read_part(
         region: Region | np.ndarray | list | None=None,
         target_fields=None,
         exact_cut=True,
-        n_workers=DEFAULT_N_PROCS,
+        n_workers=config['DEFAULT_N_PROCS'],
         use_process=True,
         copy_result=True):
 
-    filename = os.path.join(path, FILENAME_FORMAT_HDF.format(data='part', iout=iout))
+    filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data='part', iout=iout))
     data = read_hdf(filename, part_type, region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=False)
     return data
 
@@ -359,12 +354,12 @@ def read_cell(
         target_fields=None,
         levelmax_load=None,
         exact_cut=True,
-        n_workers=DEFAULT_N_PROCS,
+        n_workers=config['DEFAULT_N_PROCS'],
         use_process=True,
         copy_result=True,
         read_branch=False):
 
-    filename = os.path.join(path, FILENAME_FORMAT_HDF.format(data='cell', iout=iout))
+    filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data='cell', iout=iout))
     if levelmax_load is not None:
         data_leaf = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmax=levelmax_load, use_process=use_process, copy_result=copy_result, is_cell=True)
         data_branch = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmin=levelmax_load, levelmax=levelmax_load, use_process=use_process, copy_result=copy_result, is_cell=True)
@@ -381,7 +376,7 @@ def ramsese_to_hdf(
         path_ramses: str,
         iout: int,
         path_hdf: str,
-        n_workers=DEFAULT_N_PROCS,
+        n_workers=config['DEFAULT_N_PROCS'],
         use_process=True):
 
     if use_process:
@@ -392,13 +387,13 @@ def ramsese_to_hdf(
     part = io.read_part(path_ramses, iout, n_workers=n_workers, use_process=use_process, copy_result=False)
     cell = io.read_cell(path_ramses, iout, n_workers=n_workers, use_process=use_process, copy_result=False)
 
-    with h5py.File(os.path.join(path_hdf, FILENAME_FORMAT_HDF.format(data='part', iout=iout)), 'w') as f:
+    with h5py.File(os.path.join(path_hdf, config['FILENAME_FORMAT_HDF'].format(data='part', iout=iout)), 'w') as f:
         group = f.create_group('part')
         dset = group.create_dataset('data', data=part, compression="gzip")
         group.attrs['nchunks'] = 1
         group.attrs['hilbert_boundary'] = np.array([[0]], dtype=np.uint64)
 
-    with h5py.File(os.path.join(path_hdf, FILENAME_FORMAT_HDF.format(data='cell', iout=iout)), 'w') as f:
+    with h5py.File(os.path.join(path_hdf, config['FILENAME_FORMAT_HDF'].format(data='cell', iout=iout)), 'w') as f:
         group_leaf = f.create_group('leaf')
         dset_leaf = group_leaf.create_dataset('data', data=cell['leaf'], compression="gzip")
         group_leaf.attrs['nchunks'] = 1

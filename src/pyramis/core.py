@@ -1,11 +1,9 @@
 from typing import Union
 import numpy as np
 
-from .geometry import DIM_KEYS, Box, Region
+from .geometry import Box, Region
 from .utils import hilbert3d
 from . import config
-
-DEFAULT_LEVEL_SUBDIVIDE = config['DEFAULT_LEVEL_SUBDIVIDE']
 
 def domain_slice(data, domain_list, bounds):
     """
@@ -21,7 +19,7 @@ def domain_slice(data, domain_list, bounds):
     return merged
 
 
-def compute_chunk_list_from_hilbert(region: Union[Region, np.ndarray, list], hilbert_boundary, level_hilbert, boxlen: float=1.0, level_divide=None, level_subdivide: int=DEFAULT_LEVEL_SUBDIVIDE, ndim: int=3) -> np.ndarray:
+def compute_chunk_list_from_hilbert(region: Union[Region, np.ndarray, list], hilbert_boundary, level_hilbert, boxlen: float=1.0, level_divide=None, level_subdivide: int=config['DEFAULT_LEVEL_SUBDIVIDE'], ndim: int=3) -> np.ndarray:
     """
     Computes the list of chunk indices that intersect with the given region based on 3-dimensional Hilbert curve partitioning.
 

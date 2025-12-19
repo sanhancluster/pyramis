@@ -3,12 +3,13 @@ from . import config
 from scipy.integrate import cumulative_trapezoid
 from types import SimpleNamespace
 
-DIM_KEYS = config['DIM_KEYS']
-
 cgs_unit = SimpleNamespace(**config['CGS_UNIT'])
 
+def get_dim_keys():
+    return config['VARIABLE_NAME_ABBREVIATION'][config['VARIABLE_NAME_GROUP']]['DIM_KEYS']
+
 def get_vector(data: np.ndarray, name_format: str='{axis}', axis=-1) -> np.ndarray:
-    return np.stack([data[f'{name_format.format(axis=axis)}'] for axis in DIM_KEYS], axis=axis)
+    return np.stack([data[f'{name_format.format(axis=axis)}'] for axis in get_dim_keys()], axis=axis)
 
 
 def get_position(data: np.ndarray, axis=-1) -> np.ndarray:
