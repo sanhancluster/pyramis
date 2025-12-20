@@ -1,5 +1,5 @@
 import numpy as np
-from . import config, get_dim_keys
+from . import get_dim_keys
 
 class Region():
     def evaluate(self, data):

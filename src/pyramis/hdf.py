@@ -5,7 +5,7 @@ import numpy as np
 from concurrent.futures import as_completed
 import warnings
 
-from . import config, get_dim_keys
+from . import get_config, get_dim_keys
 from .core import compute_chunk_list_from_hilbert
 from .geometry import Region, Box
 from .utils.arrayview import SharedView
@@ -14,6 +14,8 @@ from. import io
 
 from multiprocessing.shared_memory import SharedMemory
 
+config = get_config()
+
 def get_by_type(obj: h5py.File | h5py.Group, name:str, datatype=None):
     data = obj.get(name)
     if datatype is not None:
@@ -21,10 +23,37 @@ def get_by_type(obj: h5py.File | h5py.Group, name:str, datatype=None):
     return data
 
 
+def remap_dtype_fields(dtype: np.dtype, field_mapping: dict=None) -> np.dtype:
+    """
+    Create a new dtype by renaming fields of an existing compound dtype.
+    Parameters
+    ----------
+    dtype : np.dtype
+        Original compound dtype.
+    field_mapping : dict
+        Mapping from old field names to new field names.
+    Returns
+    -------
+    np.dtype
+        New compound dtype with renamed fields.
+    """
+    if field_mapping is None:
+        field_mapping = config['VNAME_MAPPING'][config['VNAME_GROUP']]
+    new_fields = []
+    for name in dtype.names:
+        if name in field_mapping and field_mapping[name] is not None:
+            new_name = field_mapping[name]
+        else:
+            new_name = name
+        new_fields.append((new_name, dtype.fields[name][0]))
+    new_dtype = np.dtype(new_fields)
+    return new_dtype
+
+
 def _chunk_size_worker(
         args):
     path, name, start, end, region, is_cell = args
-    
+
     with h5py.File(path, 'r', locking=False) as f:
         group = get_by_type(f, name, h5py.Group)
         
@@ -32,13 +61,17 @@ def _chunk_size_worker(
             return group.attrs['size']
             
         data = get_by_type(group, 'data', h5py.Dataset)
+        dtype = data.dtype
 
-        fields = get_dim_keys()
+        fields_native = get_dim_keys(name_group='native')
         if is_cell:
-            fields = fields + ['level']
+            fields_native = fields_native + ['level']
 
-        data = data.fields(fields)[start:end]
-        mask = region.contains_data(data, size=2.**-(data['level']) if is_cell else 0)
+        new_dtype = np.dtype([(name, dtype.fields[name][0]) for name in fields_native if name in dtype.names])
+        new_dtype = remap_dtype_fields(new_dtype)
+    
+        data_slice = data.fields(fields_native)[start:end].view(new_dtype)
+        mask = region.contains_data(data_slice, size=2.**-(data_slice['level']) if is_cell else 0)
 
         return np.sum(mask)
 
@@ -65,22 +98,23 @@ def _load_slice_worker(args):
         )
     """
 
-    (path, group_name, target_fields,
+    (path, group_name, target_fields_native,
      shm_name, shared_arr, ndata_tot, dtype_out,
      start, end, offset, ndata, region, is_cell) = args
 
+    mapping = config['VNAME_MAPPING'][config['VNAME_GROUP']]
     # Each worker opens the HDF5 file independently.
     with h5py.File(path, 'r', locking=False) as f:
         group = f.get(group_name)
         data = group.get('data')
-        if target_fields is not None:
+        if target_fields_native is not None:
             # If dataset is compound, select only requested fields.
-            data = data.fields(target_fields)
-        data_slice = data[start:end]
+            data = data.fields(target_fields_native)
 
+        data_slice = data[start:end].view(dtype_out)
         # Precompute mask if needed
         if region is not None:
-            mask = region.contains_data(data_slice, size=2.**-(data_slice['level']) if is_cell else 0)
+            mask = region.contains_data(data_slice, size=2.**-(data_slice[mapping.get('level', 'level')]) if is_cell else 0)
         else:
             mask = None
 
@@ -100,6 +134,7 @@ def _load_slice_worker(args):
             if mask is not None:
                 shared_arr[offset:offset + ndata] = data_slice[mask]
             else:
+                print(data_slice.dtype, shared_arr.dtype)
                 shared_arr[offset:offset + ndata] = data_slice
 
 def _chunk_slice_hdf_mp(
@@ -126,14 +161,19 @@ def _chunk_slice_hdf_mp(
     with h5py.File(path, "r") as f:
         group = f[group_name]
         data = get_by_type(group, "data", h5py.Dataset)
+        dtype = remap_dtype_fields(data.dtype)
         if target_fields is not None:
-            data = data.fields(target_fields)
+            mapping = config['VNAME_MAPPING'][config['VNAME_GROUP']]
+            mapping_reverse = {v: k for k, v in mapping.items() if isinstance(v, str)}
+            target_fields_native = [mapping_reverse.get(f, f) for f in target_fields]
+            data = data.fields(target_fields_native)
+        else:
+            target_fields_native = None
 
         bounds = get_by_type(group, boundary_name, h5py.Dataset)[:]
-        dtype = data.dtype
     
     if target_fields is not None:
-        dtype_out = np.dtype([(name, dtype_out.fields[name][0]) for name in target_fields if name in dtype_out.names])
+        dtype_out = np.dtype([(name, dtype.fields[name][0]) for name in target_fields if name in dtype.names])
     else:
         dtype_out = dtype
 
@@ -181,7 +221,7 @@ def _chunk_slice_hdf_mp(
 
             # Prepare worker job arguments
             jobs = [
-                (path, group_name, target_fields, shm.name, None, ndata_tot, dtype_out, int(start), int(end), int(offset), int(ndata), region, is_cell)
+                (path, group_name, target_fields_native, shm.name, None, ndata_tot, dtype_out, int(start), int(end), int(offset), int(ndata), region, is_cell)
                 for start, end, offset, ndata in zip(starts, ends, offsets, ndata_per_chunk)
                 if ndata > 0]
 
@@ -213,7 +253,7 @@ def _chunk_slice_hdf_mp(
     else:
         shared_arr = np.empty((ndata_tot,), dtype=dtype_out)
         jobs = [
-            (path, group_name, target_fields, None, shared_arr, ndata_tot, dtype.str, int(start), int(end), int(offset), int(size), region, is_cell)
+            (path, group_name, target_fields_native, None, shared_arr, ndata_tot, dtype_out, int(start), int(end), int(offset), int(size), region, is_cell)
             for start, end, offset, size in zip(starts, ends, offsets, ndata_per_chunk)
             if size > 0]
         with get_mp_executor(backend=mp_backend, n_workers=n_workers) as executor:
@@ -242,19 +282,29 @@ def _chunk_slice_hdf(
     with h5py.File(path, 'r') as f:
         group = get_by_type(f, name, h5py.Group)
         data = get_by_type(group, 'data', h5py.Dataset)
-        if target_fields is not None:
-            data = data.fields(target_fields)
+        dtype = remap_dtype_fields(data.dtype)
         bounds = get_by_type(group, boundary_name, h5py.Dataset)[:]
         starts, ends = bounds[chunk_indices], bounds[chunk_indices + chunk_sizes]
+
+        if target_fields is not None:
+            mapping = config['VNAME_MAPPING'][config['VNAME_GROUP']]
+            mapping_reverse = {v: k for k, v in mapping.items() if isinstance(v, str)}
+            target_fields_native = [mapping_reverse.get(f, f) for f in target_fields]
+            data = data.fields(target_fields_native)
+
+        if target_fields is not None:
+            dtype_out = np.dtype([(name, dtype.fields[name][0]) for name in target_fields if name in dtype.names])
+        else:
+            dtype_out = dtype
 
         # Read and filter each chunk
         output_list = []
         for start, end in zip(starts, ends):
-            data_chunk = data[start:end]
+            data_slice = data[start:end].view(dtype_out)
             if region is not None:
-                mask = region.contains_data(data_chunk, size=2.**-(data_chunk['level']) if is_cell else 0)
-                data_chunk = data_chunk[mask]
-            output_list.append(data_chunk)
+                mask = region.contains_data(data_slice, size=2.**-(data_slice['level']) if is_cell else 0)
+                data_slice = data_slice[mask]
+            output_list.append(data_slice)
         output = np.concatenate(output_list)
     return output
 
@@ -279,18 +329,16 @@ def read_hdf(
     
     if exact_cut and region is not None and target_fields is not None:
         warn = False
-        if 'x' not in target_fields:
+        dim_keys = get_dim_keys()
+        for key in dim_keys:
+            if key not in target_fields:
+                warn = True
+                target_fields = target_fields + [key]
+        var_mapping = config['VNAME_MAPPING'][config['VNAME_GROUP']]
+        level_key = var_mapping.get('level', 'level')
+        if level_key not in target_fields and is_cell:
             warn = True
-            target_fields = target_fields + ['x']
-        if 'y' not in target_fields:
-            warn = True
-            target_fields = target_fields + ['y']
-        if 'z' not in target_fields:
-            warn = True
-            target_fields = target_fields + ['z']
-        if 'level' not in target_fields and is_cell:
-            warn = True
-            target_fields = target_fields + ['level']
+            target_fields = target_fields + [level_key]
         if warn:
             warnings.warn("Exact cut with region specified requires position fields to be loaded. They have been added to target_fields.")
 
@@ -307,7 +355,7 @@ def read_hdf(
                 boxlen=group.parent.attrs.get('boxlen', 1.0),
             )
         else:
-            nchunks = int(group.attrs.get('nchunks', 0))
+            nchunks = int(group.attrs.get('n_chunk', 0))
             chunk_indices = np.arange(nchunks)
         if levelmax is not None or levelmin is not None:
             if levelmin is None:
@@ -333,8 +381,8 @@ def read_hdf(
 
 def read_part(
         path: str,
-        iout: int,
         part_type: str,
+        iout: int | None=None,
         region: Region | np.ndarray | list | None=None,
         target_fields=None,
         exact_cut=True,
@@ -342,14 +390,17 @@ def read_part(
         use_process=True,
         copy_result=True):
 
-    filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data='part', iout=iout))
+    if iout is None:
+        filename = path
+    else:
+        filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data='part', iout=iout))
     data = read_hdf(filename, part_type, region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=False)
     return data
 
 
 def read_cell(
         path: str,
-        iout: int,
+        iout: int | None=None,
         region: Region | np.ndarray | list | None=None,
         target_fields=None,
         levelmax_load=None,
@@ -358,8 +409,11 @@ def read_cell(
         use_process=True,
         copy_result=True,
         read_branch=False):
-
-    filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data='cell', iout=iout))
+    
+    if iout is None:
+        filename = path
+    else:
+        filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data='cell', iout=iout))
     if levelmax_load is not None:
         data_leaf = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmax=levelmax_load, use_process=use_process, copy_result=copy_result, is_cell=True)
         data_branch = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmin=levelmax_load, levelmax=levelmax_load, use_process=use_process, copy_result=copy_result, is_cell=True)

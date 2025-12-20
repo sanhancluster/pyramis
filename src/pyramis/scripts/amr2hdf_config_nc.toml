@@ -1,6 +1,4 @@
 repo = "/automnt/data83/NewCluster/snapshots"
-imin = 830
-imax = 830
 version = "1.2"
 overwrite = true
 nload = 480

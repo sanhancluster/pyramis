@@ -9,7 +9,7 @@ from concurrent.futures import as_completed
 import configparser
 
 import re
-from . import config, get_dim_keys, get_position, get_velocity, get_cosmo_table, cosmo_convert
+from . import get_config, get_dim_keys, get_position, get_velocity, get_cosmo_table, cosmo_convert
 from .core import compute_chunk_list_from_hilbert, str_to_tuple, quad_to_f16
 from pyramis.geometry import Region, Box
 from .utils.fortranfile import FortranFile
@@ -21,6 +21,7 @@ import h5py
 from multiprocessing.shared_memory import SharedMemory
 from itertools import repeat
 
+config = get_config()
 
 def get_available_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missing=False, scheduled_only=False, namelist_path=None, scale_threshold=5.) -> np.ndarray:
     pattern = os.path.join(path, config['OUTPUT_FORMAT_ANY'])
@@ -28,6 +29,7 @@ def get_available_snapshots(path: str, check_data=['amr', 'hydro', 'part'], repo
     iout_list = []
     aexp_list = []
     time_list = []
+    nstep_coarse_list = []
     for d in dirs:
         basename = os.path.basename(d)
         ok = True
@@ -53,8 +55,9 @@ def get_available_snapshots(path: str, check_data=['amr', 'hydro', 'part'], repo
             iout_list.append(iout)
             aexp_list.append(info['aexp'])
             time_list.append(info['time'])
+            nstep_coarse_list.append(info['nstep_coarse'])
     
-    table = np.rec.fromarrays([iout_list, aexp_list, time_list], dtype=[('iout', 'i4'), ('aexp', 'f8'), ('time', 'f8')])
+    table = np.rec.fromarrays([iout_list, aexp_list, time_list, nstep_coarse_list], dtype=[('iout', 'i4'), ('aexp', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4')])
     table.sort(order='iout')
 
     if scheduled_only:
@@ -116,8 +119,8 @@ def read_type_descriptor(path: str, iout: int, data: str='part') -> np.dtype:
     fd = np.genfromtxt(fd_path, delimiter=",", names=True, dtype=None, encoding="utf-8", skip_header=1, autostrip=True)
     data_dtype = []
     for p in fd:
-        vname = p['variable_name']
-        vname_abbr = config['VARIABLE_NAME_ABBREVIATION'][config['VARIABLE_NAME_GROUP']]
+        vname = p['vname']
+        vname_abbr = config['VNAME_MAPPING'][config['VNAME_GROUP']]
         if vname in vname_abbr.keys():
             vname = vname_abbr[vname]
         data_dtype.append((str(vname), p['variable_type']))
@@ -286,10 +289,6 @@ def _read_npart_file(path, iout, icpu, part_type, family_exists, is_star):
     filename = get_data_path('part', path, iout, icpu)
     with FortranFile(f"{filename}", mode='r') as f:
         # Option 1: read nstar if part_type is 'star'
-        if is_star:
-            f.skip_records(4)
-            nstar, = f.read_ints('i4')
-            return nstar
         f.skip_records(2)
         npart, = f.read_ints('i4')
         
@@ -732,7 +731,7 @@ def read_cell(
         dtype_out = np.dtype(dtype_out.descr + dtype.descr)
     
     if read_grav:
-        dtype_out = np.dtype(dtype_out.descr + [(config['VARIABLE_NAME_ABBREVIATION'][config['VARIABLE_NAME_GROUP']]['phi'], np.float64)])
+        dtype_out = np.dtype(dtype_out.descr + [(config['VNAME_MAPPING'][config['VNAME_GROUP']]['potential'], np.float64)])
     
     if read_cpu:
         dtype_out = np.dtype(dtype_out.descr + [('cpu', np.int32)])
@@ -915,7 +914,7 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
                 f_hydro.skip_records(2 * ncpu_after + skip_hydro * nloop_after)
     
     if read_grav:
-        phi_name = config['VARIABLE_NAME_ABBREVIATION'][config['VARIABLE_NAME_GROUP']]['phi']
+        phi_name = config['VNAME_MAPPING'][config['VNAME_GROUP']]['potential']
         if phi_name in dtype_out.names:
             cursor = 0
             with FortranFile(filename_grav, mode='r') as f_grav:

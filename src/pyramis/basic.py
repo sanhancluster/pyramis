@@ -1,12 +1,21 @@
 import numpy as np
-from . import config
+from . import get_config
 from scipy.integrate import cumulative_trapezoid
 from types import SimpleNamespace
 
+config = get_config()
 cgs_unit = SimpleNamespace(**config['CGS_UNIT'])
 
-def get_dim_keys():
-    return config['VARIABLE_NAME_ABBREVIATION'][config['VARIABLE_NAME_GROUP']]['DIM_KEYS']
+def get_vname_mapping(name_group=None):
+    if name_group is not None:
+        return config['VNAME_MAPPING'][name_group]
+    else:
+        return config['VNAME_MAPPING'][config['VNAME_GROUP']]
+
+
+def get_dim_keys(name_group=None):
+        return get_vname_mapping(name_group=name_group)['DIM_KEYS']
+
 
 def get_vector(data: np.ndarray, name_format: str='{axis}', axis=-1) -> np.ndarray:
     return np.stack([data[f'{name_format.format(axis=axis)}'] for axis in get_dim_keys()], axis=axis)

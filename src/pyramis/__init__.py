@@ -1,6 +1,6 @@
-from .config_module import load_config
-config = load_config()
-
+from .config_module import set_config, get_config
 from .basic import *
 
-__all__ = ["config"]
+config = get_config()
+
+__all__ = ["config", "set_config"]

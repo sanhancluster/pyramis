@@ -7,7 +7,7 @@ from typing import Any
 
 BASE_CONFIG = "config_base.toml"
 CONFIG = "config.toml"
-
+_config = None
 
 def _deep_update(dst: dict[str, Any], src: dict[str, Any]) -> dict[str, Any]:
     for k, v in src.items():
@@ -32,3 +32,14 @@ def load_config() -> dict[str, Any]:
     except FileNotFoundError:
         return config
     return _deep_update(config, override)
+
+def get_config():
+    global _config
+    if _config is None:
+        _config = load_config()
+    return _config
+
+def set_config(key, value):
+    cfg = get_config()
+    cfg[key] = value
+    return cfg

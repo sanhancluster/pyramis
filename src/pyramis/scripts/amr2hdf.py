@@ -10,10 +10,11 @@ from packaging.version import Version
 from typing import Optional, Tuple
 
 from pyramis.utils import Timestamp, hilbert3d_map
+from pyramis.utils.arrayview import SharedView
 from pyramis import io, get_dim_keys
 import tomllib
 
-io.config['VARIABLE_NAME_GROUP'] = 'native'
+io.config['VNAME_GROUP'] = 'native' # Recommended to use native variable names
 
 
 def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='../hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=True, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8):
@@ -126,10 +127,18 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
         if len(cpu_list_sub) == 0:
             continue
 
-        part_data = io.read_part(path=path, iout=iout, cpulist=cpu_list_sub, read_cpu=True, n_workers=nthread)
+        part_data = io.read_part(path=path, iout=iout, cpulist=cpu_list_sub, read_cpu=True, n_workers=nthread, use_process=True, copy_result=False)
 
         if part_data is None:
             raise ValueError("Particle not loaded in snapshot")
+        
+        # sort the particle data in each hilbert domain to save sorting time later
+        npart_per_cpu = io.read_npart_per_cpu(path, iout, cpu_list_sub)
+        for offset, n in zip(np.cumsum(npart_per_cpu), npart_per_cpu):
+            part_slice = part_data[offset - n:offset]
+            hkey = get_hilbert_key(np.asarray([part_slice[key] for key in get_dim_keys()]).T, info['nlevelmax'], nthread=nthread)
+            sort_idx = np.argsort(hkey, kind='mergesort')
+            part_data[offset-n:offset] = part_slice[sort_idx]
         
         for name in names:
             new_part = new_part_dict[name]
@@ -152,6 +161,8 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
                 new_part_dict[name][pointer_dict[name]:pointer_dict[name] + part.size][field[0]] = part[field[0]]
             pointer_dict[name] += part.size
         
+        if isinstance(part_data, SharedView):
+            part_data.close()
         del part_data
     
     # ensure the number of particles match the header
@@ -251,6 +262,9 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
     """
     Get a new array to store cell data.
     """
+
+    info = io.get_info(path, iout)
+
     new_cell = None
     pointer = 0
 
@@ -267,13 +281,23 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
         cpu_list_sub = cpu_list[idx:np.minimum(idx + size_load, len(cpu_list))]
         if len(cpu_list_sub) == 0:
             continue
-        cell_data = io.read_cell(path=path, iout=iout, cpulist=cpu_list_sub, read_branch=read_branch, read_hydro=True, read_grav=True, read_cpu=True, n_workers=nthread)
+        cell_data = io.read_cell(path=path, iout=iout, cpulist=cpu_list_sub, read_branch=read_branch, read_hydro=True, read_grav=True, read_cpu=True, n_workers=nthread, use_process=True, copy_result=False)
+
+        # sort the cell data in each hilbert domain to save sorting time later
+        ncell_per_cpu = io.read_ncell_per_cpu(path, iout, cpu_list_sub, read_branch=read_branch)
+        for offset, n in zip(np.cumsum(ncell_per_cpu), ncell_per_cpu):
+            cell_slice = cell_data[offset - n:offset]
+            hkey = get_hilbert_key(np.asarray([cell_slice[key] for key in get_dim_keys()]).T, info['nlevelmax'], nthread=nthread)
+            sort_idx = np.argsort(hkey, kind='mergesort')
+            cell_data[offset-n:offset] = cell_slice[sort_idx]
 
         timer.message(f"Exporting cell data with {cell_data.size} cells..."
               f"\nItem size: {cell_data.dtype.itemsize} -> {new_cell.dtype.itemsize} B ({new_cell.dtype.itemsize / cell_data.dtype.itemsize * 100:.2f}%)")
         for field in new_dtypes:
             new_cell[pointer:pointer + cell_data.size][field[0]] = cell_data[field[0]]
         pointer += cell_data.size
+        if isinstance(cell_data, SharedView):
+            cell_data.close()
         del cell_data
     return new_cell, pointer
 
@@ -284,10 +308,12 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
     This function will export both particle and cell data.
     """
 
-    vname_abbr = io.config['VARIABLE_NAME_ABBREVIATION'][io.config['VARIABLE_NAME_GROUP']]
+    vname_abbr = io.config['VNAME_MAPPING'][io.config['VNAME_GROUP']]
     iout_avail = io.get_available_snapshots(path, check_data=['amr', 'hydro', 'part', 'grav'], scheduled_only=False)['iout']
     if iout_list is None:
         iout_list = iout_avail
+    else:
+        iout_list = iout_list[np.isin(iout_list, iout_avail)]
 
     info = io.get_info(path, iout_list[0])
     if size_load <= 0:

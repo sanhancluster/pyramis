@@ -83,6 +83,10 @@ class SharedView:
         # If it's a copy (e.g. advanced indexing), return ndarray directly
         return out
     
+    def __setitem__(self, key, value):
+        self._ensure_open()
+        self._arr[key] = value
+
     def __len__(self):
         self._ensure_open()
         return len(self._arr)
