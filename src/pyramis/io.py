@@ -9,7 +9,7 @@ from concurrent.futures import as_completed
 import configparser
 
 import re
-from . import get_config, get_dim_keys, get_position, get_velocity, get_cosmo_table, cosmo_convert
+from . import get_config, get_dim_keys, get_position, get_velocity, get_cosmo_table, cosmo_convert, get_vname, get_cell_size
 from .core import compute_chunk_list_from_hilbert, str_to_tuple, quad_to_f16
 from pyramis.geometry import Region, Box
 from .utils.fortranfile import FortranFile
@@ -119,10 +119,7 @@ def read_type_descriptor(path: str, iout: int, data: str='part') -> np.dtype:
     fd = np.genfromtxt(fd_path, delimiter=",", names=True, dtype=None, encoding="utf-8", skip_header=1, autostrip=True)
     data_dtype = []
     for p in fd:
-        vname = p['vname']
-        vname_abbr = config['VNAME_MAPPING'][config['VNAME_GROUP']]
-        if vname in vname_abbr.keys():
-            vname = vname_abbr[vname]
+        vname = get_vname(p['variable_name'])
         data_dtype.append((str(vname), p['variable_type']))
     return np.dtype(data_dtype)
 
@@ -497,7 +494,7 @@ def read_part(
     dtype_out = dtype_read
 
     if read_cpu:
-        dtype_out = np.dtype(dtype_out.descr + [('cpu', np.int32)])
+        dtype_out = np.dtype(dtype_out.descr + [(get_vname('cpu'), np.int32)])
 
     if target_fields is not None:
         dtype_out = np.dtype([(name, dtype_out.fields[name][0]) for name in target_fields if name in dtype_out.names])
@@ -543,7 +540,7 @@ def read_part(
         )
     
     if exact_cut and region is not None:
-        result2 = result[region.contains(get_position(result))]
+        result2 = result[region.contains_data(result, cell=False)]
         if isinstance(result, SharedView):
             result.close()
         result = result2
@@ -587,8 +584,8 @@ def _load_part_file(icpu, output_arr, path, iout, dtype_read, part_type=None):
                 )
             part_data[name] = arr
         
-        if 'cpu' in dtype_out.names:
-            part_data['cpu'] = icpu
+        if get_vname('cpu') in dtype_out.names:
+            part_data[get_vname('cpu')] = icpu
 
         if part_type is not None:
             mask = mask_by_part_type(part_data, part_type)
@@ -725,16 +722,16 @@ def read_cell(
     dtype = np.dtype(dtype)
 
     dim_dtype = [(key, np.float64) for key in get_dim_keys()[:info['ndim']]]
-    dtype_out = np.dtype(dim_dtype + [('level', np.int32)])
+    dtype_out = np.dtype(dim_dtype + [(get_vname('level'), np.int32)])
 
     if read_hydro:
         dtype_out = np.dtype(dtype_out.descr + dtype.descr)
     
     if read_grav:
-        dtype_out = np.dtype(dtype_out.descr + [(config['VNAME_MAPPING'][config['VNAME_GROUP']]['potential'], np.float64)])
+        dtype_out = np.dtype(dtype_out.descr + [(get_vname('potential'), np.float64)])
     
     if read_cpu:
-        dtype_out = np.dtype(dtype_out.descr + [('cpu', np.int32)])
+        dtype_out = np.dtype(dtype_out.descr + [(get_vname('cpu'), np.int32)])
     
     if target_fields is not None:
         dtype_out = np.dtype([(name, dtype_out.fields[name][0]) for name in target_fields if name in dtype_out.names])
@@ -783,7 +780,7 @@ def read_cell(
         )
     
     if exact_cut and region is not None:
-        result2 = result[region.contains(get_position(result), size=2.**-(result['level']))]
+        result2 = result[region.contains_data(result, cell=True, boxsize=info['boxsize'])]
         if isinstance(result, SharedView):
             result.close()
         result = result2
@@ -914,7 +911,7 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
                 f_hydro.skip_records(2 * ncpu_after + skip_hydro * nloop_after)
     
     if read_grav:
-        phi_name = config['VNAME_MAPPING'][config['VNAME_GROUP']]['potential']
+        phi_name = get_vname('potential')
         if phi_name in dtype_out.names:
             cursor = 0
             with FortranFile(filename_grav, mode='r') as f_grav:
@@ -1149,6 +1146,6 @@ def read_sink(
             result[name] = arr
     
     if exact_cut and region is not None:
-        result = result[region.contains(get_position(result))]
+        result = result[region.contains_data(result, cell=False)]
 
     return result

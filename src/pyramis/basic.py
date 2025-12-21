@@ -6,27 +6,35 @@ from types import SimpleNamespace
 config = get_config()
 cgs_unit = SimpleNamespace(**config['CGS_UNIT'])
 
-def get_vname_mapping(name_group=None):
+def get_vname(name: str, name_group: str | None=None):
     if name_group is not None:
-        return config['VNAME_MAPPING'][name_group]
+        mapping = config['VNAME_MAPPING'][name_group]
     else:
-        return config['VNAME_MAPPING'][config['VNAME_GROUP']]
+        mapping = config['VNAME_MAPPING'][config['VNAME_GROUP']]
+    vname = mapping.get(name, name)
+    if vname is None:
+        vname = name
+    return vname
 
 
 def get_dim_keys(name_group=None):
-        return get_vname_mapping(name_group=name_group)['DIM_KEYS']
+        return get_vname('DIM_KEYS', name_group=name_group)
 
 
-def get_vector(data: np.ndarray, name_format: str='{axis}', axis=-1) -> np.ndarray:
-    return np.stack([data[f'{name_format.format(axis=axis)}'] for axis in get_dim_keys()], axis=axis)
+def get_vector(data, name_format: str='{key}', axis=-1) -> np.ndarray:
+    return np.stack([data[f'{name_format.format(key=key)}'] for key in get_dim_keys()], axis=axis)
 
 
-def get_position(data: np.ndarray, axis=-1) -> np.ndarray:
-    return get_vector(data, name_format='{axis}', axis=axis)
+def get_position(data, axis=-1) -> np.ndarray:
+    return get_vector(data, name_format='{key}', axis=axis)
 
 
-def get_velocity(data: np.ndarray, axis=-1) -> np.ndarray:
-    return get_vector(data, name_format='v{axis}', axis=axis)
+def get_velocity(data, axis=-1) -> np.ndarray:
+    return get_vector(data, name_format='v{key}', axis=axis)
+
+
+def get_cell_size(data, boxsize: float=1.0):
+    return boxsize * 2.**-data[get_vname('level')]
 
 
 def get_cosmo_table(H0: float, omega_m: float, omega_l: float, omega_k=None, omega_r=None, nbins=5000, aexp_min=1E-4, aexp_max=10.0) -> np.ndarray:

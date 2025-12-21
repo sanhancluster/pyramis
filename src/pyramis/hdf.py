@@ -5,7 +5,7 @@ import numpy as np
 from concurrent.futures import as_completed
 import warnings
 
-from . import get_config, get_dim_keys
+from . import get_config, get_dim_keys, get_vname
 from .core import compute_chunk_list_from_hilbert
 from .geometry import Region, Box
 from .utils.arrayview import SharedView
@@ -23,7 +23,7 @@ def get_by_type(obj: h5py.File | h5py.Group, name:str, datatype=None):
     return data
 
 
-def remap_dtype_fields(dtype: np.dtype, field_mapping: dict=None) -> np.dtype:
+def remap_dtype_fields(dtype: np.dtype, field_mapping: dict | None=None) -> np.dtype:
     """
     Create a new dtype by renaming fields of an existing compound dtype.
     Parameters
@@ -71,7 +71,8 @@ def _chunk_size_worker(
         new_dtype = remap_dtype_fields(new_dtype)
     
         data_slice = data.fields(fields_native)[start:end].view(new_dtype)
-        mask = region.contains_data(data_slice, size=2.**-(data_slice['level']) if is_cell else 0)
+        boxsize = f.attrs.get('boxsize', 1.0)
+        mask = region.contains_data(data_slice, cell=is_cell, boxsize=boxsize)
 
         return np.sum(mask)
 
@@ -102,7 +103,6 @@ def _load_slice_worker(args):
      shm_name, shared_arr, ndata_tot, dtype_out,
      start, end, offset, ndata, region, is_cell) = args
 
-    mapping = config['VNAME_MAPPING'][config['VNAME_GROUP']]
     # Each worker opens the HDF5 file independently.
     with h5py.File(path, 'r', locking=False) as f:
         group = f.get(group_name)
@@ -114,7 +114,8 @@ def _load_slice_worker(args):
         data_slice = data[start:end].view(dtype_out)
         # Precompute mask if needed
         if region is not None:
-            mask = region.contains_data(data_slice, size=2.**-(data_slice[mapping.get('level', 'level')]) if is_cell else 0)
+            boxsize = f.attrs.get('boxsize', 1.0)
+            mask = region.contains_data(data_slice, cell=is_cell, boxsize=boxsize)
         else:
             mask = None
 
@@ -298,11 +299,12 @@ def _chunk_slice_hdf(
             dtype_out = dtype
 
         # Read and filter each chunk
+        boxsize = f.attrs.get('boxsize', 1.0)
         output_list = []
         for start, end in zip(starts, ends):
             data_slice = data[start:end].view(dtype_out)
             if region is not None:
-                mask = region.contains_data(data_slice, size=2.**-(data_slice['level']) if is_cell else 0)
+                mask = region.contains_data(data_slice, cell=is_cell, boxsize=boxsize)
                 data_slice = data_slice[mask]
             output_list.append(data_slice)
         output = np.concatenate(output_list)
@@ -334,11 +336,12 @@ def read_hdf(
             if key not in target_fields:
                 warn = True
                 target_fields = target_fields + [key]
-        var_mapping = config['VNAME_MAPPING'][config['VNAME_GROUP']]
-        level_key = var_mapping.get('level', 'level')
-        if level_key not in target_fields and is_cell:
+
+        vname_level = get_vname('level')
+        if vname_level not in target_fields and is_cell:
             warn = True
-            target_fields = target_fields + [level_key]
+            target_fields = target_fields + [vname_level]
+
         if warn:
             warnings.warn("Exact cut with region specified requires position fields to be loaded. They have been added to target_fields.")
 
