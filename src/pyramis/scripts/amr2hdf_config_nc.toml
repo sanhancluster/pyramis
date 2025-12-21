@@ -1,7 +1,7 @@
 repo = "/automnt/data83/NewCluster/snapshots"
 version = "1.2"
 overwrite = true
-nload = 480
+nload = 240
 nthread = 8
 walltime = 90.0
 nchunk = 8000

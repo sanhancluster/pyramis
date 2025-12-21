@@ -74,6 +74,8 @@ def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
         add_attr_with_descr(fl, 'n_level', n_level, 'Number of levels in the snapshot.')
         add_attr_with_descr(fl, 'n_chunk', n_chunk, 'Number of chunks in the snapshot.')
 
+        add_attr_with_descr(fl, 'script', os.path.basename(__file__), 'Name of the script used to generate the file.')
+
         n_part_tot = 0
         for name in names:
             new_part = new_part_dict[name][:pointer_dict[name]]
@@ -559,7 +561,7 @@ def add_group(fl:h5py.File, name:str, new_data:np.ndarray, levelmin:int, levelma
     write_dataset(grp, 'chunk_boundary', data=chunk_boundary, **dataset_kw)
     if level_boundary is not None:
         write_dataset(grp, 'level_boundary', data=level_boundary, **dataset_kw)
-    timer.message(f"Exporting {name} data with {new_data.size} components...")
+    timer.message(f"Writing {name} data with {new_data.size} components...")
     write_dataset(grp, 'data', data=new_data, sort_key=sort_key, mem_block_bytes=1000 * 1024**2, **dataset_kw)
 
     return grp
@@ -651,9 +653,6 @@ def main(args):
     size_load = args.nload
     nthread = args.nthread
     relative_output_path = args.output
-
-    if 'chunks' in dataset_kw.keys() and isinstance(dataset_kw['chunks'], int):
-        dataset_kw['chunks'] = (dataset_kw['chunks'],)
 
     #iout_list = np.arange(0, snap.iout, 10)[::-1]
     #iout_list = [repo.get_snap(z=z).iout for z in [1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0]][::-1]
