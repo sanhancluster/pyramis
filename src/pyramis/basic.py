@@ -6,19 +6,36 @@ from types import SimpleNamespace
 config = get_config()
 cgs_unit = SimpleNamespace(**config['CGS_UNIT'])
 
-def get_vname(name: str, name_group: str | None=None):
-    if name_group is not None:
-        mapping = config['VNAME_MAPPING'][name_group]
+def get_vname(vname: str, name_set: str | None=None):
+    if name_set is not None:
+        mapping = config['VNAME_MAPPING'][name_set]
     else:
-        mapping = config['VNAME_MAPPING'][config['VNAME_GROUP']]
-    vname = mapping.get(name, name)
+        mapping = config['VNAME_MAPPING'][config['VNAME_SET']]
+    vname = mapping.get(vname, vname)
     if vname is None:
-        vname = name
+        vname = vname
     return vname
 
 
-def get_dim_keys(name_group=None):
-        return get_vname('DIM_KEYS', name_group=name_group)
+def get_mapping(name_set_to, name_set_from='native'):
+    mapping_to = config['VNAME_MAPPING'][name_set_to]
+    if name_set_from == 'native':
+        return mapping_to
+
+    mapping_from = config['VNAME_MAPPING'][name_set_from]
+    reverse_from = {v: k for k, v in mapping_from.items() if isinstance(v, str)}
+    mapping = {}
+    for k, v in mapping_to.items():
+        if isinstance(v, str) and v in reverse_from:
+            mapping[k] = reverse_from[v]
+        else:
+            mapping[k] = None
+
+    return mapping
+
+
+def get_dim_keys(name_set=None):
+        return get_vname('DIM_KEYS', name_set=name_set)
 
 
 def get_vector(data, name_format: str='{key}', axis=-1) -> np.ndarray:

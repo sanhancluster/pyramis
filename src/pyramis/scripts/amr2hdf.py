@@ -14,10 +14,10 @@ from pyramis.utils.arrayview import SharedView
 from pyramis import io, get_dim_keys
 import tomllib
 
-io.config['VNAME_GROUP'] = 'native' # Recommended to use native variable names
+io.config['VNAME_SET'] = 'native' # Recommended to use native variable names
 
 
-def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='../hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=True, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8):
+def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='../hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=False, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8):
     info = io.get_info(path, iout)
 
     if cpu_list is None:
@@ -67,6 +67,7 @@ def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
         "\n'level_boundary': Level boundary indices for each level within chunks." \
         '\n' + sim_description
         fl.attrs['created'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        fl.attrs['vname_set'] = io.config['VNAME_SET']
         add_basic_attrs(fl, info)
         add_attr_with_descr(fl, 'cpulist', cpu_list, 'List of CPU indices used for this snapshot.')
 
@@ -304,13 +305,13 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
     return new_cell, pointer
 
 
-def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=None, converted_dtypes_cell=None, output_path:str='../hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=True, sim_description:str='', sim_publication:str='', version:str='1.0', nthread:int=8, walltime=None, convert_part=True, convert_cell=True):
+def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=None, converted_dtypes_cell=None, output_path:str='../hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=False, sim_description:str='', sim_publication:str='', version:str='1.0', nthread:int=8, walltime=None, convert_part=True, convert_cell=True):
     """
     Export snapshots from the repository to HDF5 format.
     This function will export both particle and cell data.
     """
 
-    vname_abbr = io.config['VNAME_MAPPING'][io.config['VNAME_GROUP']]
+    vname_abbr = io.config['VNAME_MAPPING'][io.config['VNAME_SET']]
     iout_avail = io.get_available_snapshots(path, check_data=['amr', 'hydro', 'part', 'grav'], scheduled_only=False)['iout']
     if iout_list is None:
         iout_list = iout_avail
