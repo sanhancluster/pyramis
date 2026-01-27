@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyramis"
-version = "0.1.8"
+version = "0.1.9"
 description = "A python-based ramses analyzer for minimalist"
 authors = [
   {name="San Han", email="san.han@iap.fr"}
@@ -15,6 +15,7 @@ dependencies = [
     "h5py>=3.12.1",
     "numpy>=1.26.4",
     "scipy>=1.16.3",
+    "scikit-image>=0.21.0",
 ]
 readme = "README.md"
 keywords = ["ramses"]

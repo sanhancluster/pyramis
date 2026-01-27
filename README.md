@@ -6,6 +6,12 @@ A minimalist version of [Ramses Univsersal Reader](https://github.com/sanhanclus
 ```bash
 pip install pyramis
 ```
+### Using developement mode
+```bash
+git clone https://github.com/sanhancluster/pyramis
+cd pyramis
+pip install -e .
+```
 
 ## How to use
 ### Reading the particle data
