@@ -9,7 +9,8 @@ from concurrent.futures import as_completed
 import configparser
 
 import re
-from . import get_config, get_dim_keys, get_position, get_velocity, get_cosmo_table, cosmo_convert, get_vname, get_cell_size
+from . import get_config, get_dim_keys, get_position, get_velocity, get_vname, get_cell_size, cgs_unit
+from .astro import get_cosmo_table, cosmo_convert
 from .core import compute_chunk_list_from_hilbert, str_to_tuple, quad_to_f16
 from pyramis.geometry import Region, Box
 from .utils.fortranfile import FortranFile
@@ -272,8 +273,8 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
                 omega_k=info['omega_k'],
                 omega_r=info.get('omega_r', None),
             )
-        info['age'] = cosmo_convert(info['cosmo_table'], info['aexp'], 'aexp', 'age')
-        info['lookback_time'] = cosmo_convert(info['cosmo_table'], 1.0, 'aexp', 'age') - info['age']
+        info['age'] = cosmo_convert(info['cosmo_table'], info['aexp'], 'aexp', 'age') / cgs_unit.Gyr
+        info['lookback_time'] = cosmo_convert(info['cosmo_table'], 1.0, 'aexp', 'age') / cgs_unit.Gyr - info['age']
         info['z'] = 1.0 / info['aexp'] - 1.0
 
     return info
@@ -780,7 +781,7 @@ def read_cell(
         )
     
     if exact_cut and region is not None:
-        result2 = result[region.contains_data(result, cell=True, boxsize=info['boxsize'])]
+        result2 = result[region.contains_data(result, cell=True, boxlen=info['boxlen'])]
         if isinstance(result, SharedView):
             result.close()
         result = result2

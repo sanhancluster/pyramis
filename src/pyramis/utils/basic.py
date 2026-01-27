@@ -1,5 +1,6 @@
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from .. import config
+from ..config_module import _init_worker_config
 import multiprocessing as mp
 import time
 import sys
@@ -30,6 +31,8 @@ def get_mp_executor(backend: str="thread", n_workers: int=DEFAULT_N_PROCS):
     executor_kwargs: dict = {'max_workers': n_workers}
     if backend == "process":
         executor_kwargs['mp_context'] = ctx
+        executor_kwargs['initializer'] = _init_worker_config
+        executor_kwargs['initargs'] = (config.copy(),)
     return Executor(**executor_kwargs)
 
 

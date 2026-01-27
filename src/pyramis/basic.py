@@ -1,10 +1,5 @@
 import numpy as np
-from . import get_config
-from scipy.integrate import cumulative_trapezoid
-from types import SimpleNamespace
-
-config = get_config()
-cgs_unit = SimpleNamespace(**config['CGS_UNIT'])
+from . import config
 
 def get_vname(vname: str, name_set: str | None=None):
     if name_set is not None:
@@ -12,25 +7,25 @@ def get_vname(vname: str, name_set: str | None=None):
     else:
         mapping = config['VNAME_MAPPING'][config['VNAME_SET']]
     vname = mapping.get(vname, vname)
-    if vname is None:
-        vname = vname
     return vname
 
 
-def get_mapping(name_set_to, name_set_from='native'):
+def get_mapping(name_set_from, name_set_to):
     mapping_to = config['VNAME_MAPPING'][name_set_to]
     if name_set_from == 'native':
         return mapping_to
 
     mapping_from = config['VNAME_MAPPING'][name_set_from]
+    # Create reverse mapping from name_set_from
     reverse_from = {v: k for k, v in mapping_from.items() if isinstance(v, str)}
-    mapping = {}
-    for k, v in mapping_to.items():
-        if isinstance(v, str) and v in reverse_from:
-            mapping[k] = reverse_from[v]
-        else:
-            mapping[k] = None
 
+    # Create mapping from name_set_from to name_set_to
+    mapping = {}
+    for k, v in mapping_from.items():
+        if isinstance(v, str):
+            mapping[v] = mapping_to.get(k, k)
+        else:
+            mapping[k] = mapping_to.get(k, v)
     return mapping
 
 
@@ -50,60 +45,8 @@ def get_velocity(data, axis=-1) -> np.ndarray:
     return get_vector(data, name_format='v{key}', axis=axis)
 
 
-def get_cell_size(data, boxsize: float=1.0):
-    return boxsize * 2.**-data[get_vname('level')]
-
-
-def get_cosmo_table(H0: float, omega_m: float, omega_l: float, omega_k=None, omega_r=None, nbins=5000, aexp_min=1E-4, aexp_max=10.0) -> np.ndarray:
-    """
-    Build a conversion table for aexp, ttilde, and age of the universe.
-    ttilde refers `conformal time (super-comoving time)` scale that is used in cosmological simulation in ramses.
-    
-    Parameters
-    ----------
-    H0 : float
-        Hubble constant at z=0 in km/s/Mpc.
-    omega_m : float
-        Matter density parameter at z=0.
-    omega_l : float
-        Dark energy density parameter at z=0.
-    nbins : int, optional
-        Number of bins in the table, by default 5000.
-    """
-    def E(aexp):
-        return np.sqrt(omega_m * aexp ** -3 + omega_l)
-    
-    if omega_r is None:
-        omega_r = 0.0
-    
-    if omega_k is None:
-        omega_k = 1.0 - omega_m - omega_l - omega_r
-
-    x = np.linspace(np.log(aexp_min), np.log(aexp_max), nbins)
-    aexp = np.exp(x)
-    E = np.sqrt(omega_m * aexp**-3 + omega_l + omega_k * aexp**-2 + omega_r * aexp**-4)
-
-    dtsc_over_dx = np.exp(-x) / E
-    tsc = cumulative_trapezoid(dtsc_over_dx, x, initial=0.0)
-    tsc = tsc - np.interp(1.0, aexp, tsc)
-
-    dt_over_dx = 1. / (H0 * cgs_unit.km / cgs_unit.Mpc * E * cgs_unit.Gyr)
-    age = cumulative_trapezoid(dt_over_dx, x, initial=0.0)
-    z = 1.0 / aexp - 1.0
-    table = np.rec.fromarrays([aexp, tsc, age, z], dtype=[('aexp', 'f8'), ('t_sc', 'f8'), ('age', 'f8'), ('z', 'f8')])
-
-    return table
-
-
-def cosmo_convert(table, x, xname, yname):
-    x_arr = table[xname]
-    y_arr = table[yname]
-
-    if np.any(x < x_arr[0]) or np.any(x > x_arr[-1]):
-        raise ValueError(f"{xname} out of bounds: valid range [{x_arr[0]}, {x_arr[-1]}]")
-
-    y = np.interp(x, x_arr, y_arr)
-    return y
+def get_cell_size(data, boxlen: float=1.0):
+    return boxlen * 2.**-data[get_vname('level')]
 
 
 def uniform_digitize(values, lim, nbins):

@@ -5,12 +5,13 @@ import numpy as np
 from concurrent.futures import as_completed
 import warnings
 
-from . import config, get_dim_keys, get_vname, get_mapping
+from . import config, get_dim_keys, get_vname, get_mapping, cgs_unit
 from .core import compute_chunk_list_from_hilbert
 from .geometry import Region, Box
 from .utils.arrayview import SharedView
 from .utils import get_mp_executor
 from. import io
+from .astro import get_cosmo_table, cosmo_convert
 
 from multiprocessing.shared_memory import SharedMemory
 
@@ -71,7 +72,7 @@ def _chunk_size_worker(
     
         data_slice = data.fields(fields_file)[start:end].view(new_dtype)
         boxsize = f.attrs.get('boxsize', 1.0)
-        mask = region.contains_data(data_slice, cell=is_cell, boxsize=boxsize)
+        mask = region.contains_data(data_slice, cell=is_cell, boxlen=boxsize)
 
         return np.sum(mask)
 
@@ -114,7 +115,7 @@ def _load_slice_worker(args):
         # Precompute mask if needed
         if region is not None:
             boxsize = f.attrs.get('boxsize', 1.0)
-            mask = region.contains_data(data_slice, cell=is_cell, boxsize=boxsize)
+            mask = region.contains_data(data_slice, cell=is_cell, boxlen=boxsize)
         else:
             mask = None
 
@@ -269,7 +270,7 @@ def _chunk_slice_hdf(
         for start, end in zip(starts, ends):
             data_slice = data[start:end].view(dtype_out)
             if region is not None:
-                mask = region.contains_data(data_slice, cell=is_cell, boxsize=boxsize)
+                mask = region.contains_data(data_slice, cell=is_cell, boxlen=boxsize)
                 data_slice = data_slice[mask]
             output_list.append(data_slice)
         output = np.concatenate(output_list)
@@ -287,17 +288,18 @@ def _prepare_hdf_read(f, group_name, boundary_name, chunk_indices, chunk_sizes, 
 
     dtype_file = data.dtype
     mapping = get_mapping(vname_set_file, config['VNAME_SET'])
-    dtype = remap_dtype_names(dtype_file, mapping) if use_vname_mapping else dtype_file
     if target_fields is not None:
         if use_vname_mapping:
-            mapping_reverse = get_mapping(vname_set_file, config['VNAME_SET'])
-            target_fields_file = [mapping_reverse.get(f, f) for f in target_fields]
+            mapping_reverse = get_mapping(config['VNAME_SET'], vname_set_file)
+            target_fields_file = [mapping_reverse.get(f, f) for f in target_fields if mapping_reverse.get(f, f) in dtype_file.names]
         else:
             target_fields_file = target_fields
         data = data.fields(target_fields_file)
-        dtype_out = np.dtype([(name, dtype.fields[name][0]) for name in target_fields_file if name in dtype.names])
+        dtype_out = np.dtype([(name, dtype_file.fields[name][0]) for name in target_fields_file if name in dtype_file.names])
     else:
-        dtype_out = dtype
+        dtype_out = dtype_file
+        target_fields_file = None
+    dtype_out = remap_dtype_names(dtype_out, mapping) if use_vname_mapping else dtype_out
 
     return data, dtype_out, target_fields_file, starts, ends
 
@@ -385,6 +387,37 @@ def read_part(
         use_process=True,
         copy_result=True,
         use_vname_mapping=True):
+    """
+    Read particle data from HDF5 file.
+
+    Parameters
+    ----------
+    path : str
+        Path to the directory containing HDF5 files or full file path if iout is None.
+    part_type : str
+        Type of particles to read (e.g., 'dark_matter', 'star', etc.).
+    iout : int, optional
+        Output number to construct the filename. If None, `path` is treated as the full filename.
+    region : Region or array-like, optional
+        Region to filter particles. If None, all particles are read.
+    target_fields : list, optional
+        List of fields to read. If None, all fields are read.
+    exact_cut : bool, optional
+        Whether to apply exact cut based on the region. Defaults to True. If False, all particles in the chunks overlapping the region are read.
+    n_workers : int, optional
+        Number of parallel workers to use. Defaults to config['DEFAULT_N_PROCS'].
+    use_process : bool, optional
+        Whether to use process-based parallelism. Defaults to True. If False, thread-based parallelism is used.
+    copy_result : bool, optional
+        Whether to return a copy of the result array. Defaults to True. If False, a shared memory view is returned when using multiple processes.
+    use_vname_mapping : bool, optional
+        Whether to apply variable name mapping. Defaults to True. If False, variable names stored in the file are used directly.
+    
+    Returns
+    -------
+    np.ndarray
+        Array of particle data.
+    """
 
     if iout is None:
         filename = path
@@ -406,6 +439,39 @@ def read_cell(
         copy_result=True,
         read_branch=False,
         use_vname_mapping=True):
+    """
+    Read cell data from HDF5 file.
+
+    Parameters
+    ----------
+    path : str
+        Path to the directory containing HDF5 files or full file path if iout is None.
+    iout : int, optional
+        Output number to construct the filename. If None, `path` is treated as the full filename.
+    region : Region or array-like, optional
+        Region to filter cells. If None, all cells are read.
+    target_fields : list, optional
+        List of fields to read. If None, all fields are read.
+    levelmax_load : int, optional
+        If specified, load cells up to this maximum refinement level from leaf and branch datasets.
+    exact_cut : bool, optional
+        Whether to apply exact cut based on the region. Defaults to True. If False, all cells in the chunks overlapping the region are read.
+    n_workers : int, optional
+        Number of parallel workers to use. Defaults to config['DEFAULT_N_PROCS'].
+    use_process : bool, optional
+        Whether to use process-based parallelism. Defaults to True. If False, thread-based parallelism is used.
+    copy_result : bool, optional
+        Whether to return a copy of the result array. Defaults to True. If False, a shared memory view is returned when using multiple processes.
+    read_branch : bool, optional
+        Whether to read branch cells instead of leaf cells. Defaults to False.
+    use_vname_mapping : bool, optional
+        Whether to apply variable name mapping. Defaults to True. If False, variable names stored in the file are used directly.
+
+    Returns
+    -------
+    np.ndarray
+        Array of cell data.
+    """
     
     if iout is None:
         filename = path
@@ -421,3 +487,63 @@ def read_cell(
         data = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=True, use_vname_mapping=use_vname_mapping)
 
     return data
+
+
+def get_info(path: str, iout: int, cosmo=True, cosmo_table=None) -> dict:
+    """
+    Get simulation info from HDF5 file attributes.
+
+    Parameters
+    ----------
+    path : str
+        Path to the directory containing HDF5 files.
+    iout : int
+        Output number to construct the filename.
+    cosmo : bool, optional
+        Whether to include cosmology table and lookback time. Defaults to True.
+    cosmo_table : dict, optional
+        Precomputed cosmology table. If None, it will be created from file attributes.
+    """
+    filenames = [os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data=data, iout=iout)) for data in ['cell', 'part']]
+    filenames = [fn for fn in filenames if os.path.exists(fn)]
+    if len(filenames) == 0:
+        raise FileNotFoundError(f"No HDF5 files found for iout={iout} in {path}")
+    filename = filenames[0]
+    
+    with h5py.File(filename, 'r') as f:
+        attrs = dict(f.attrs)
+        if cosmo:
+            if cosmo_table is None:
+                H0 = attrs.get('H0', 70.0)
+                omega_m = attrs.get('omega_m', 0.3)
+                omega_l = attrs.get('omega_l', 0.7)
+                omega_k = attrs.get('omega_k', 0.0)
+                omega_r = attrs.get('omega_r', 0.0)
+                cosmo_table = get_cosmo_table(H0, omega_m, omega_l, omega_k=omega_k, omega_r=omega_r)
+            attrs['cosmo_table'] = cosmo_table
+            attrs['lookback_time'] = cosmo_convert(attrs['cosmo_table'], 1.0, 'aexp', 'age') / cgs_unit.Gyr - attrs['age']
+
+    return attrs
+
+
+def repack(path, path_new):
+    def copy_attrs(src, dst):
+        """Recursively copy all attributes"""
+        for key in src.attrs.keys():
+            dst.attrs[key] = src.attrs[key]
+    
+    def copy_group(src_group, dst_group):
+        """Recursively copy all groups, datasets, and attributes"""
+        copy_attrs(src_group, dst_group)
+        
+        for name, item in src_group.items():
+            if isinstance(item, h5py.Group):
+                # Create group and recursively copy its contents
+                new_group = dst_group.create_group(name)
+                copy_group(item, new_group)
+            elif isinstance(item, h5py.Dataset):
+                # Copy dataset with attributes
+                dst_group.copy(item, name)
+    
+    with h5py.File(path, "r") as f_old, h5py.File(path_new, "w") as f_new:
+        copy_group(f_old, f_new)

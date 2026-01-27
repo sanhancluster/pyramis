@@ -9,7 +9,7 @@ class Region():
     def contains(self, points, size=0.0):
         raise NotImplementedError()
     
-    def contains_data(self, data, cell: bool=False, boxsize: float=1.0):
+    def contains_data(self, data, cell: bool=False, boxlen: float=1.0):
         raise NotImplementedError()
 
     @property
@@ -46,9 +46,11 @@ class Box(Region):
     def bounding_box(self) -> "Box":
         return self
 
-    def contains(self, points, size: float | np.ndarray=0.0):
+    def contains(self, points, size: float | np.ndarray = 0.0):
         box = self.box
-        half_size = np.asarray(size)[..., np.newaxis] / 2
+
+        points = np.asarray(points)
+        half_size = np.asarray(size) / 2
 
         mask = np.all(
             (box[:, 0] <= points + half_size) &
@@ -57,17 +59,23 @@ class Box(Region):
         )
         return mask
     
-    def contains_data(self, data, cell: bool=False, boxsize: float=1.0):
+    def contains_data(self, data, cell: bool=False, boxlen: float=1.0):
         box = self.box
         if cell:
-            size = get_cell_size(data, boxsize=boxsize)
+            size = get_cell_size(data, boxlen=boxlen)[..., np.newaxis]
             half_size = np.asarray(size) / 2
         else:
-            half_size = 0.0
+            half_size = np.asarray(0.0)
 
         mask = np.ones(len(data), dtype=bool)
         for i, key in enumerate(get_dim_keys()):
-            mask &= (box[i, 0] <= data[key] + half_size) & (data[key] - half_size <= box[i, 1])
+            if np.ndim(half_size) == 0:
+                h = half_size
+            elif np.ndim(half_size) == 1:
+                h = half_size[i]
+            else:
+                h = half_size[:, i] if half_size.shape[1] > 1 else half_size[:, 0]
+            mask &= (box[i, 0] <= data[key] + h) & (data[key] - h <= box[i, 1])
         return mask
 
 
@@ -93,15 +101,17 @@ class Sphere(Region):
     def contains(self, points, size=0.0):
         center = self.center
         radius = self.radius
+
+        points = np.asarray(points)
         half_size = np.asarray(size) / 2
 
         return np.linalg.norm(points - center, axis=-1) <= radius - half_size
     
-    def contains_data(self, data, cell: bool=False, boxsize: float=1.0):
+    def contains_data(self, data, cell: bool=False, boxlen: float=1.0):
         center = self.center
         radius = self.radius
 
-        half_size = get_cell_size(data, boxsize=boxsize) / 2 if cell else 0.0
+        half_size = get_cell_size(data, boxlen=boxlen) / 2 if cell else 0.0
 
         # TODO: need more accurate intersection
         dist2 = np.zeros(len(data), dtype=float)
@@ -129,7 +139,11 @@ class Spheroid(Region):
     def contains(self, points, size=0):
         center = self.center
         radii = self.radii
-        normed = (points - center) / (radii - size)
+
+        points = np.asarray(points)
+        half_size = np.asarray(size) / 2
+
+        normed = (points - center) / (radii - half_size)
         dist = np.linalg.norm(normed, axis=-1)
         mask = dist <= 1
         return mask
@@ -138,7 +152,7 @@ class Spheroid(Region):
         center = self.center
         radii = self.radii
         
-        half_size = get_cell_size(data, boxsize=boxsize) / 2 if cell else 0.0
+        half_size = get_cell_size(data, boxlen=boxsize) / 2 if cell else 0.0
 
         # TODO: need more accurate intersection
         dist2 = np.zeros(len(data), dtype=float)

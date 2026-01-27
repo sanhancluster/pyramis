@@ -42,4 +42,8 @@ def get_config():
 def set_config(key, value):
     cfg = get_config()
     cfg[key] = value
-    return cfg
+
+
+def _init_worker_config(cfg):
+    config = get_config()
+    _deep_update(config, cfg)
