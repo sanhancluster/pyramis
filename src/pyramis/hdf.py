@@ -489,6 +489,47 @@ def read_cell(
     return data
 
 
+def read_star(path: str, iout: int | None=None, region: Region | np.ndarray | list | None=None,
+              target_fields=None, exact_cut=True, n_workers=config['DEFAULT_N_PROCS'],
+              use_process=True, copy_result=True, use_vname_mapping=True):
+    """
+    Read star particle data from HDF5 file.
+    """
+    return read_part(path, 'star', iout=iout, region=region, target_fields=target_fields, 
+                     exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, 
+                     copy_result=copy_result, use_vname_mapping=use_vname_mapping)
+
+def read_dm(path: str, iout: int | None=None, region: Region | np.ndarray | list | None=None,
+              target_fields=None, exact_cut=True, n_workers=config['DEFAULT_N_PROCS'],
+              use_process=True, copy_result=True, use_vname_mapping=True):
+    """
+    Read dark matter particle data from HDF5 file.
+    """
+    return read_part(path, 'dm', iout=iout, region=region, target_fields=target_fields, 
+                     exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, 
+                     copy_result=copy_result, use_vname_mapping=use_vname_mapping)
+
+def read_sink(path: str, iout: int | None=None, region: Region | np.ndarray | list | None=None,
+              target_fields=None, exact_cut=True, n_workers=config['DEFAULT_N_PROCS'],
+              use_process=True, copy_result=True, use_vname_mapping=True):
+    """
+    Read sink particle data from HDF5 file.
+    """
+    return read_part(path, 'sink', iout=iout, region=region, target_fields=target_fields, 
+                     exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, 
+                     copy_result=copy_result, use_vname_mapping=use_vname_mapping)
+
+def read_tracer(path: str, iout: int | None=None, region: Region | np.ndarray | list | None=None,
+              target_fields=None, exact_cut=True, n_workers=config['DEFAULT_N_PROCS'],
+              use_process=True, copy_result=True, use_vname_mapping=True):
+    """
+    Read tracer particle data from HDF5 file.
+    """
+    return read_part(path, 'tracer', iout=iout, region=region, target_fields=target_fields, 
+                     exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, 
+                     copy_result=copy_result, use_vname_mapping=use_vname_mapping)
+
+
 def get_info(path: str, iout: int, cosmo=True, cosmo_table=None) -> dict:
     """
     Get simulation info from HDF5 file attributes.
