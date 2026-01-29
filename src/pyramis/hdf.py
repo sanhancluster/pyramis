@@ -1,6 +1,7 @@
 import os
 import h5py
 import numpy as np
+import glob
 
 from concurrent.futures import as_completed
 import warnings
@@ -14,6 +15,46 @@ from. import io
 from .astro import get_cosmo_table, cosmo_convert
 
 from multiprocessing.shared_memory import SharedMemory
+
+
+def check_snapshots(path: str, check_data=['cell', 'part']) -> np.ndarray:
+    iout_list = None
+    for data in check_data:
+        pattern = config['FILENAME_FORMAT_HDF_ANY'].format(data=data)
+        files = glob.glob(os.path.join(path, pattern))
+        iouts_data = []
+        for f in files:
+            basename = os.path.basename(f)
+            parts = basename.split('_')
+            if len(parts) < 2:
+                continue
+            iout_part = parts[1]
+            try:
+                iout_str = iout_part.split('.')[0]
+                iout = int(iout_str)
+                iouts_data.append(iout)
+            except ValueError:
+                continue
+        if iout_list is None:
+            iout_list = np.array(iouts_data)
+        else:
+            iout_list = iout_list[np.isin(iout_list, iouts_data)]
+    if iout_list is None:
+        iout_list = np.array([])
+    
+    aexp_list, time_list, nstep_coarse_list = [], [], []
+    for iout in iout_list:
+        info = get_info(path, iout, cosmo=False)
+        aexp_list.append(info.get('aexp', 1.0))
+        time_list.append(info.get('age', 0.0))
+        nstep_coarse_list.append(info.get('icoarse', 0))
+
+    table = np.rec.fromarrays(
+        [iout_list, aexp_list, time_list, nstep_coarse_list, np.zeros(len(iout_list), dtype=bool)],
+        dtype=[('iout', 'i4'), ('aexp', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4'), ('scheduled', '?')])
+    table = np.sort(table, order='iout')
+    return table
+
 
 def get_by_type(obj: h5py.File | h5py.Group, name:str, datatype=None):
     data = obj.get(name)

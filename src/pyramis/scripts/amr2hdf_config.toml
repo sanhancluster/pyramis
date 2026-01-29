@@ -1,5 +1,5 @@
 # RAMSES repositiory path where 'output_*' is located
-repo = "/storage7/NewCluster/snapshots"
+repo = "/storage7/NewCluster"
 
 # Range of iout to be converted
 imin = 1
@@ -23,7 +23,7 @@ nchunk = 8000
 
 # Simulation publication and description to be stored in HDF5 attributes
 sim_publication = "https://doi.org/10.48550/arXiv.2507.06301"
-sim_description_common = """
+sim_description = """
 For any use of this data, please cite the original publication (Han et al.):
 {sim_publication}"""
 

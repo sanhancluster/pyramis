@@ -1,14 +1,14 @@
-repo = "/automnt/data83/NewCluster/snapshots"
+repo = "/automnt/data83/NewCluster"
 version = "1.2"
 overwrite = false
 nload = 240
 nthread = 8
 walltime = 90.0
 nchunk = 8000
-output = "../hdf"
+output = "hdf"
 
 sim_publication = "https://doi.org/10.1051/0004-6361/202556291"
-sim_description_common = """
+sim_description = """
 This file contains snapshot data of NewCluster simulation.
 For any use of this data, please cite the original publication (Han et al.):
 {sim_publication}

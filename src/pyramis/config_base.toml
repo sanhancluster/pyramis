@@ -1,16 +1,19 @@
-OUTPUT_FORMAT = "output_{iout:05d}"
-OUTPUT_FORMAT_ANY = "output_*"
+OUTPUT_FORMAT = "snapshots/output_{iout:05d}"
+OUTPUT_FORMAT_ANY = "snapshots/output_*"
 FILENAME_FORMAT = "{data}_{iout:05d}.out{icpu:05d}"
 FILENAME_FORMAT_ANY = "{data}_{iout:05d}.out*"
+
 FILENAME_FORMAT_HDF = "hdf/{data}_{iout:05d}.h5"
+FILENAME_FORMAT_HDF_ANY = "hdf/{data}_*.h5"
+
 NAMELIST_FILENAME = "namelist.txt"
 FILE_DESCRIPTOR_FORMAT = "{data}_file_descriptor.txt"
 DEFAULT_N_PROCS = 8
 DEFAULT_LEVEL_SUBDIVIDE = 2
 
-HALOMAKER_FORMAT = "halo/tree_brick_{iout:05d}"
-GALAXYMAKER_FORMAT = "galaxy/tree_brick_{iout:05d}"
-PTREE_FORMAT = "ptree/ptree_{iout:05d}.pkl"
+FILENAME_FORMAT_HALOMAKER = "halo/tree_brick_{iout:05d}"
+FILENAME_FORMAT_GALAXYMAKER = "galaxy/tree_brick_{iout:05d}"
+FILENAME_FORMAT_PTREE = "ptree/ptree_{iout:05d}.pkl"
 
 VNAME_SET = "native"
 
@@ -45,7 +48,7 @@ dust_bin04 = "d4"
 refinement_scalar = "refmask"
 dMsmbh = "dM"
 dMBH_coarse = "Mdot"
-dMEd_disk = "Medd"
+dMEd_coarse = "Medd"
 jsink_x = "jx"
 jsink_y = "jy"
 jsink_z = "jz"

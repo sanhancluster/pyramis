@@ -17,7 +17,7 @@ import tomllib
 io.config['VNAME_SET'] = 'native' # Recommended to use native variable names
 
 
-def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='../hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=False, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8):
+def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=False, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8, update_attributes=False):
     info = io.get_info(path, iout)
 
     if cpu_list is None:
@@ -40,12 +40,14 @@ def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
         except (KeyError, OSError) as e:
             print(f"File {output_file} exists but is not a valid HDF5 file. Overwriting.")
     
-    timer.message(f"Generating new part dictionary for iout = {iout} with {len(cpu_list)} CPUs...")
-    new_part_dict, pointer_dict = get_new_part_dict(path, iout, cpu_list=cpu_list, size_load=size_load, converted_dtypes=converted_dtypes, nthread=nthread)
-    names = new_part_dict.keys()
-    
-    timer.message(f"Creating HDF5 file {output_file} with {len(new_part_dict)} particle types...")
-    with h5py.File(output_file, 'w') as fl:
+    if not update_attributes:
+        timer.message(f"Generating new part dictionary for iout = {iout} with {len(cpu_list)} CPUs...")
+        new_part_dict, pointer_dict = get_new_part_dict(path, iout, cpu_list=cpu_list, size_load=size_load, converted_dtypes=converted_dtypes, nthread=nthread)
+        names = new_part_dict.keys()
+        timer.message(f"Creating HDF5 file {output_file} with {len(new_part_dict)} particle types...")
+
+    open_mode = 'w' if not update_attributes else 'r+'
+    with h5py.File(output_file, open_mode) as fl:
         fl.attrs['publication'] = sim_publication
         fl.attrs['description'] = 'Ramses particle data' \
         "\n============================================================================" \
@@ -67,7 +69,6 @@ def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
         "\n'level_boundary': Level boundary indices for each level within chunks." \
         '\n' + sim_description
         fl.attrs['created'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        fl.attrs['vname_set'] = io.config['VNAME_SET']
         add_basic_attrs(fl, info)
         add_attr_with_descr(fl, 'cpulist', cpu_list, 'List of CPU indices used for this snapshot.')
 
@@ -77,21 +78,21 @@ def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
 
         add_attr_with_descr(fl, 'script', os.path.basename(__file__), 'Name of the script used to generate the file.')
 
-        n_part_tot = 0
-        for name in names:
-            new_part = new_part_dict[name][:pointer_dict[name]]
-            if new_part.size == 0:
-                print(f"No particles of type {name} found in iout = {info['iout']}. Skipping export.")
-                continue
+        if not update_attributes:
+            n_part_tot = 0
+            for name in names:
+                new_part = new_part_dict[name][:pointer_dict[name]]
+                if new_part.size == 0:
+                    print(f"No particles of type {name} found in iout = {info['iout']}. Skipping export.")
+                    continue
 
-            # Add particle data to HDF5 file
-            add_group(fl, name, new_part,
-                      levelmin=info['levelmin'], levelmax=info['levelmax'],
-                      n_chunk=n_chunk, n_level=n_level, part=True, dataset_kw=dataset_kw)
+                # Add particle data to HDF5 file
+                add_group(fl, name, new_part,
+                        levelmin=info['levelmin'], levelmax=info['levelmax'],
+                        n_chunk=n_chunk, n_level=n_level, part=True, dataset_kw=dataset_kw)
+                n_part_tot += new_part.size
+            add_attr_with_descr(fl, 'size', n_part_tot, 'Total number of particles in the snapshot.')
 
-            n_part_tot += new_part.size
-        
-        add_attr_with_descr(fl, 'size', n_part_tot, 'Total number of particles in the snapshot.')
         add_attr_with_descr(fl, 'version', version, 'Version of the file.')
 
 def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes, nthread=8) -> Tuple[dict, dict]:
@@ -184,7 +185,7 @@ def compute_key_boundaries(key_array: np.ndarray, n_key: int) -> np.ndarray:
     return key_boundaries
 
 
-def create_hdf5_cell(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='../hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=True, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8):
+def create_hdf5_cell(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=True, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8, update_attributes=False):
     """
     Export cell data from the snapshot to HDF5 format.
     """
@@ -236,28 +237,27 @@ def create_hdf5_cell(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
         add_attr_with_descr(fl, 'n_level', n_level, 'Number of levels in the snapshot.')
         add_attr_with_descr(fl, 'n_chunk', n_chunk, 'Number of chunks in the snapshot.')
 
-        n_cell_tot = 0
+        if not update_attributes:
+            n_cell_tot = 0
+            read_branch = None
+            for name in ['leaf', 'branch']:
+                timer.message(f"Generating new {name} cell array for iout = {iout} with {len(cpu_list)} CPUs...")
+                if name == 'leaf':
+                    read_branch = False
+                elif name == 'branch':
+                    read_branch = True
+                else:
+                    raise ValueError(f"Unknown cell type: {name}")
+                new_cell, pointer = get_new_cell(path, iout, cpu_list=cpu_list, size_load=size_load, converted_dtypes=converted_dtypes, read_branch=read_branch, nthread=nthread)
+                new_cell = new_cell[:pointer]
 
-        read_branch = None
-        for name in ['leaf', 'branch']:
-            timer.message(f"Generating new {name} cell array for iout = {iout} with {len(cpu_list)} CPUs...")
-            if name == 'leaf':
-                read_branch = False
-            elif name == 'branch':
-                read_branch = True
-            else:
-                raise ValueError(f"Unknown cell type: {name}")
-            new_cell, pointer = get_new_cell(path, iout, cpu_list=cpu_list, size_load=size_load, converted_dtypes=converted_dtypes, read_branch=read_branch, nthread=nthread)
-            new_cell = new_cell[:pointer]
+                # Add cell data to HDF5 file
+                add_group(fl, name, new_cell,
+                        levelmin=info['levelmin'], levelmax=info['levelmax'],
+                        n_chunk=n_chunk, n_level=n_level, part=False, dataset_kw=dataset_kw)
+                n_cell_tot += new_cell.size
+            add_attr_with_descr(fl, 'size', n_cell_tot, 'Total number of cells in the snapshot.')
 
-            # Add cell data to HDF5 file
-            add_group(fl, name, new_cell,
-                      levelmin=info['levelmin'], levelmax=info['levelmax'],
-                      n_chunk=n_chunk, n_level=n_level, part=False, dataset_kw=dataset_kw)
-
-            n_cell_tot += new_cell.size
-
-        add_attr_with_descr(fl, 'size', n_cell_tot, 'Total number of cells in the snapshot.')
         add_attr_with_descr(fl, 'version', version, 'Version of the file.')
 
 
@@ -305,14 +305,14 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
     return new_cell, pointer
 
 
-def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=None, converted_dtypes_cell=None, output_path:str='../hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=False, sim_description:str='', sim_publication:str='', version:str='1.0', nthread:int=8, walltime=None, convert_part=True, convert_cell=True):
+def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=None, converted_dtypes_cell=None, output_path:str='hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=False, sim_description:str='', sim_publication:str='', version:str='1.0', nthread:int=8, walltime=None, convert_part=True, convert_cell=True, update_attributes=False):
     """
     Export snapshots from the repository to HDF5 format.
     This function will export both particle and cell data.
     """
 
     vname_abbr = io.config['VNAME_MAPPING'][io.config['VNAME_SET']]
-    iout_avail = io.get_available_snapshots(path, check_data=['amr', 'hydro', 'part', 'grav'], scheduled_only=False)['iout']
+    iout_avail = io.check_snapshots(path, check_data=['amr', 'hydro', 'part', 'grav'])['iout']
     if iout_list is None:
         iout_list = iout_avail
     else:
@@ -394,12 +394,12 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
         # Start exporting cell and particle data for each snapshot
         if convert_part and converted_dtypes_part is not None:
             timer.start(f"Starting particle data extraction for iout = {iout}.", name='part_hdf')
-            create_hdf5_part(path, iout, n_chunk=n_chunk, size_load=size_load, converted_dtypes=converted_dtypes_part, output_path=output_path, cpu_list=cpu_list, dataset_kw=dataset_kw, overwrite=overwrite, sim_description=sim_description, sim_publication=sim_publication, version=version, nthread=nthread)
+            create_hdf5_part(path, iout, n_chunk=n_chunk, size_load=size_load, converted_dtypes=converted_dtypes_part, output_path=output_path, cpu_list=cpu_list, dataset_kw=dataset_kw, overwrite=overwrite, sim_description=sim_description, sim_publication=sim_publication, version=version, nthread=nthread, update_attributes=update_attributes)
             timer.record(f"Particle data extraction completed for iout = {iout}.", name='part_hdf')
         
         if convert_cell and converted_dtypes_cell is not None:
             timer.start(f"Starting cell data extraction for iout = {iout}.", name='cell_hdf')
-            create_hdf5_cell(path, iout, n_chunk=n_chunk, size_load=size_load, converted_dtypes=converted_dtypes_cell['cell'], output_path=output_path, cpu_list=cpu_list, dataset_kw=dataset_kw, overwrite=overwrite, sim_description=sim_description, sim_publication=sim_publication, version=version, nthread=nthread)
+            create_hdf5_cell(path, iout, n_chunk=n_chunk, size_load=size_load, converted_dtypes=converted_dtypes_cell['cell'], output_path=output_path, cpu_list=cpu_list, dataset_kw=dataset_kw, overwrite=overwrite, sim_description=sim_description, sim_publication=sim_publication, version=version, nthread=nthread, update_attributes=update_attributes)
             timer.record(f"Cell data extraction completed for iout = {iout}.", name='cell_hdf')
 
         if walltime is not None:
@@ -455,25 +455,25 @@ def add_basic_attrs(fl: h5py.File, info: dict):
     Add basic attributes to the HDF5 file.
     """
 
-    add_attr_with_descr(fl, 'iout', info['iout'], 'Output index of the snapshot.')
-    add_attr_with_descr(fl, 'icoarse', info['nstep_coarse'], 'Number of coarse time steps of the snapshot.')
-    add_attr_with_descr(fl, 'ncpu', info['ncpu'], 'Number of CPUs used in the simulation.')
-    add_attr_with_descr(fl, 'ndim', info['ndim'], 'Number of dimensions of the simulation.')
+    add_attr_with_descr(fl, 'iout', info.get('iout', 0), 'Output index of the snapshot.')
+    add_attr_with_descr(fl, 'icoarse', info.get('nstep_coarse', 0), 'Number of coarse time steps of the snapshot.')
+    add_attr_with_descr(fl, 'ncpu', info.get('ncpu', 0), 'Number of CPUs used in the simulation.')
+    add_attr_with_descr(fl, 'ndim', info.get('ndim', 0), 'Number of dimensions of the simulation.')
 
-    add_attr_with_descr(fl, 'levelmin', info['levelmin'], 'Minimum level of the simulation.')
-    add_attr_with_descr(fl, 'levelmax', info['levelmax'], 'Maximum level of the simulation.')
-    add_attr_with_descr(fl, 'boxlen', info['boxlen'], 'Length of the simulation box.')
+    add_attr_with_descr(fl, 'levelmin', info.get('levelmin', 0), 'Minimum level of the simulation.')
+    add_attr_with_descr(fl, 'levelmax', info.get('levelmax', 0), 'Maximum level of the simulation.')
+    add_attr_with_descr(fl, 'boxlen', info.get('boxlen', 0), 'Length of the simulation box.')
 
-    add_attr_with_descr(fl, 'time', info['time'], 'Time of the snapshot.')
-    add_attr_with_descr(fl, 'aexp', info['aexp'], 'Scale factor of the snapshot.')
-    add_attr_with_descr(fl, 'age', info['age'], 'Age of the snapshot in Gyr.')
-    add_attr_with_descr(fl, 'z', info['z'], 'Redshift of the snapshot.')
+    add_attr_with_descr(fl, 'time', info.get('time', 0), 'Time of the snapshot.')
+    add_attr_with_descr(fl, 'aexp', info.get('aexp', 0), 'Scale factor of the snapshot.')
+    add_attr_with_descr(fl, 'age', info.get('age', 0), 'Age of the snapshot in Gyr.')
+    add_attr_with_descr(fl, 'z', info.get('z', 0), 'Redshift of the snapshot.')
 
-    add_attr_with_descr(fl, 'omega_m', info['omega_m'], 'Matter density parameter.')
-    add_attr_with_descr(fl, 'omega_l', info['omega_l'], 'Dark energy density parameter.')
-    add_attr_with_descr(fl, 'omega_k', info['omega_k'], 'Curvature density parameter.')
-    add_attr_with_descr(fl, 'omega_b', info['omega_b'], 'Baryon density parameter.')
-    add_attr_with_descr(fl, 'H0', info['H0'], 'Hubble constant at z=0.')
+    add_attr_with_descr(fl, 'omega_m', info.get('omega_m', 0), 'Matter density parameter.')
+    add_attr_with_descr(fl, 'omega_l', info.get('omega_l', 0), 'Dark energy density parameter.')
+    add_attr_with_descr(fl, 'omega_k', info.get('omega_k', 0), 'Curvature density parameter.')
+    add_attr_with_descr(fl, 'omega_b', info.get('omega_b', 0), 'Baryon density parameter.')
+    add_attr_with_descr(fl, 'H0', info.get('H0', 0), 'Hubble constant at z=0.')
 
     add_attr_with_descr(fl, 'unit_l', info['unit_l'], 'Unit of length in cm.')
     add_attr_with_descr(fl, 'unit_d', info['unit_d'], 'Unit of density in g/cm^3.')
@@ -481,6 +481,15 @@ def add_basic_attrs(fl: h5py.File, info: dict):
     add_attr_with_descr(fl, 'unit_m', info['unit_d'] * info['unit_l']**3, 'Unit of mass in g.')
     add_attr_with_descr(fl, 'unit_v', info['unit_l'] / info['unit_t'], 'Unit of velocity in cm/s.')
     add_attr_with_descr(fl, 'unit_p', info['unit_d'] * info['unit_l']**2 / info['unit_t']**2, 'Unit of pressure in g/(cm*s^2).')
+
+    add_attr_with_descr(fl, 'vname_set', io.config['VNAME_SET'], 'Variable name set used in the file.')
+    add_attr_with_descr(fl, 'aout', info.get('aout', []), 'List of scheduled output scale factors in the simulation.')
+    add_attr_with_descr(fl, 'tout', info.get('tout', []), 'List of available output indices in the simulation.')
+
+    add_attr_with_descr(fl, 'dtold', info.get('dtold', 0), 'Old time step in the simulation.')
+    add_attr_with_descr(fl, 'dtnew', info.get('dtnew', 0), 'New time step in the simulation.')
+
+    add_attr_with_descr(fl, 'gamma', info.get('gamma', 0), 'Adiabatic index of the gas.')
 
 def add_attr_with_descr(fl: h5py.File, key: str, value, description: str):
     """
@@ -661,12 +670,14 @@ def main(args):
     export_snapshots(repo_path, iout_list=iout_list, n_chunk=n_chunk, size_load=size_load,
                      converted_dtypes_part=converted_dtypes_part, converted_dtypes_cell=converted_dtypes_cell,
                      output_path=relative_output_path, cpu_list=cpu_list, dataset_kw=dataset_kw,
-                     sim_description=sim_description, sim_publication=sim_publication, version=version, overwrite=overwrite, nthread=nthread, walltime=args.walltime)
+                     sim_description=sim_description, sim_publication=sim_publication,
+                     version=version, overwrite=overwrite, nthread=nthread, walltime=args.walltime, update_attributes=args.update_attributes)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Convert Ramses snapshot data to HDF5 format.')
     print(f"Usage: {parser.prog} [options] <repo_path>")
+    print("Check config (*.toml) file to set options if needed. (Usage example: python ramses_to_hdf5.py -c config.toml)")
     parser.add_argument("--repo", "-r", help='Repository path', type=str, default='.')
     parser.add_argument("--imin", "-i", help='Minimum output index to process (default: 1)', type=int, default=1)
     parser.add_argument("--imax", "-I", help='Maximum output index to process (default: 1)', type=int, default=1)
@@ -679,6 +690,7 @@ if __name__ == '__main__':
     parser.add_argument("--walltime", "-w", help='Walltime limit (hours) for the job (default: None)', type=float, default=None)
     parser.add_argument("--config", "-c", help='Path to configuration file (default: None)', type=str, default=None)
     parser.add_argument("--output", "-p", help='Relative output path (default: hdf)', type=str, default='hdf')
+    parser.add_argument("--update-attributes", "-a", help='Update attributes in existing HDF5 files without rewriting data', action='store_true')
 
     args = parser.parse_args()
 

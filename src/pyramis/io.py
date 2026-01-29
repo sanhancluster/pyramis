@@ -24,7 +24,7 @@ from itertools import repeat
 
 config = get_config()
 
-def get_available_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missing=False, scheduled_only=False, namelist_path=None, scale_threshold=5.) -> np.ndarray:
+def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missing=False, namelist_path=None, scale_threshold=50.) -> np.ndarray:
     pattern = os.path.join(path, config['OUTPUT_FORMAT_ANY'])
     dirs = glob.glob(pattern)
     iout_list = []
@@ -40,7 +40,7 @@ def get_available_snapshots(path: str, check_data=['amr', 'hydro', 'part'], repo
 
         if os.path.exists(info_path) is False:
             if report_missing:
-                warnings.warn(f"Info file missing for iout={iout} in directory {d}.", UserWarning)
+                print(f"Info file missing for iout={iout} in directory {d}.")
             continue
             
         info = parse_info(info_path)
@@ -50,7 +50,7 @@ def get_available_snapshots(path: str, check_data=['amr', 'hydro', 'part'], repo
             files = glob.glob(file_pattern)
             if len(files) != info['ncpu']:
                 if report_missing:
-                    warnings.warn(f"Number of '{data}' files does not match for iout={iout}. Expected {info['ncpu']} files, found {len(files)}.", UserWarning)
+                    print(f"Number of '{data}' files does not match for iout={iout}. Expected {info['ncpu']} files, found {len(files)}.")
                 ok = False                    
         if ok:
             iout_list.append(iout)
@@ -58,57 +58,61 @@ def get_available_snapshots(path: str, check_data=['amr', 'hydro', 'part'], repo
             time_list.append(info['time'])
             nstep_coarse_list.append(info['nstep_coarse'])
     
-    table = np.rec.fromarrays([iout_list, aexp_list, time_list, nstep_coarse_list], dtype=[('iout', 'i4'), ('aexp', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4')])
+    table = np.rec.fromarrays([iout_list, aexp_list, time_list, nstep_coarse_list, np.zeros(len(iout_list), dtype=bool)], dtype=[('iout', 'i4'), ('aexp', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4'), ('scheduled', '?')])
     table.sort(order='iout')
 
-    if scheduled_only:
-        # get the latest snapshot info
-        iout_check = table['iout'][-1]
-        info = get_info(path, iout_check)
+    # get the latest snapshot info
+    iout_check = table['iout'][-1]
+    info = get_info(path, iout_check, namelist_path=namelist_path, read_amr=False, read_hydro=False)
 
-        aout, tout = [], []
-        if 'aout' in info:
-            aout = np.array(info['aout'])
-        if 'tout' in info:
-            tout = np.array(info['tout'])
+    aout, tout = [], []
+    if 'aout' in info:
+        aout = np.array(info['aout'])
+    if 'tout' in info:
+        tout = np.array(info['tout'])
 
-        if 'aout' not in info and 'tout' not in info:
-            if namelist_path is None:
-                namelist_path = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout_check), config['NAMELIST_FILENAME'])
-            nml = parse_namelist(namelist_path)
-
-            scheduled = np.zeros(len(table), dtype=bool)
-
-            if 'aout' in nml:
-                aout = np.array(tuple(aout))
-            if 'tout' in nml:
-                tout = np.array(tuple(tout))
-
-        if aout.size > 0:
-            a_thr = np.max(aout) / info['nstep_coarse'] * scale_threshold
-        if tout.size > 0:
-            t_thr = np.max(tout) / info['nstep_coarse'] * scale_threshold
+    if 'aout' not in info and 'tout' not in info:
+        if namelist_path is None:
+            namelist_path = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout_check), config['NAMELIST_FILENAME'])
+        nml = parse_namelist(namelist_path)
 
         scheduled = np.zeros(len(table), dtype=bool)
-        scheduled[0] = True # always include the first snapshot
-        for a in aout:
-            # find the closest aexp in the table, except those already found
-            diff = np.abs(table['aexp'] - a)
-            diff_masked = np.where(scheduled, np.inf, diff)
-            cand_key = np.argmin(diff_masked)
-            cand = table[cand_key]
-            if np.abs(cand['aexp'] - a) < a_thr:
-                scheduled[cand_key] = True
-        
-        for t in tout:
-            diff = np.abs(table['time'] - t)
-            diff_masked = np.where(scheduled, np.inf, diff)
-            cand_key = np.argmin(diff_masked)
-            cand = table[cand_key]
-            if np.abs(cand['time'] - t) < t_thr:
-                scheduled[cand_key] = True
 
-        table = table[scheduled]
+        if 'aout' in nml['OUTPUT_PARAMS']:
+            aout = np.array(tuple(nml['OUTPUT_PARAMS']['aout'].split(','))).astype(np.float64)
+        if 'tout' in nml['OUTPUT_PARAMS']:
+            tout = np.array(tuple(nml['OUTPUT_PARAMS']['tout'].split(','))).astype(np.float64)
+
+    if len(aout) > 0:
+        a_thr = table['aexp'] / table['nstep_coarse'] * scale_threshold
+    if len(tout) > 0:
+        t_thr = table['time'] / table['nstep_coarse'] * scale_threshold
+
+    scheduled = np.zeros(len(table), dtype=bool)
+    scheduled[0] = True # always include the first snapshot
+    for i, a in enumerate(aout):
+        # find the closest aexp in the table, except those already found
+        diff = np.abs(table['aexp'] - a)
+        diff_masked = np.where(scheduled, np.inf, diff)
+        cand_key = np.argmin(diff_masked)
+        cand = table[cand_key]
+        if np.abs(cand['aexp'] - a) < a_thr[cand_key]:
+            scheduled[cand_key] = True
+        else:
+            if a < np.max(table['aexp']):
+                print(f"No snapshot found close enough to aexp={a:.5f} (closest is iout={cand['iout']}, aexp={cand['aexp']:.5f} with difference {np.abs(cand['aexp'] - a):.5f}, threshold is {a_thr[cand_key]:.5f})")
+    
+    for i, t in enumerate(tout):
+        diff = np.abs(table['time'] - t)
+        diff_masked = np.where(scheduled, np.inf, diff)
+        cand_key = np.argmin(diff_masked)
+        cand = table[cand_key]
+        if np.abs(cand['time'] - t) < t_thr[cand_key]:
+            scheduled[cand_key] = True
+        else:
+            if t < np.max(table['time']):
+                print(f"No snapshot found close enough to time={t:.5f} (closest is iout={cand['iout']}, time={cand['time']:.5f} with difference {np.abs(cand['time'] - t):.5f}, threshold is {t_thr[cand_key]:.5f})")
+    table['scheduled'] = scheduled
 
     return table
 
