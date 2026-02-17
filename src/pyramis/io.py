@@ -345,7 +345,7 @@ def read_npart_header(path, iout):
     return family_counts
 
 
-def read_npart_per_cpu(path, iout, cpulist=None, dtype_read=None, part_type=None, info=None, n_workers: int | None=None, mp_backend: str="thread") -> Sequence[int]:
+def read_npart_per_cpu(path, iout, cpulist=None, dtype_read=None, part_type=None, info=None, n_workers: int | None=None, mp_backend: str="thread") -> np.ndarray:
     if cpulist is None:
         if info is None:
             info = get_info(path, iout)
@@ -359,7 +359,7 @@ def read_npart_per_cpu(path, iout, cpulist=None, dtype_read=None, part_type=None
     if n_workers in (None, 1):
         for icpu in cpulist:
             npart_cpu.append(_read_npart_file(path, iout, icpu, part_type, family_exists, is_star))
-        return npart_cpu
+        return np.array(npart_cpu)
     
     else:
         with get_mp_executor(backend=mp_backend, n_workers=n_workers) as ex:
@@ -374,7 +374,7 @@ def read_npart_per_cpu(path, iout, cpulist=None, dtype_read=None, part_type=None
                     repeat(is_star),
                 )
             )
-        return results
+        return np.array(results)
 
 
 def mask_by_part_type(part, part_type):
@@ -413,7 +413,7 @@ def mask_by_part_type(part, part_type):
 @overload
 def read_part(
     path: str, 
-    iout: int, 
+    iout: int | None = None, 
     region: Region | np.ndarray | list | None = None, 
     cpulist: Sequence[int] | np.ndarray | None = None,
     target_fields: Sequence[str] | None = None,
@@ -429,7 +429,7 @@ def read_part(
 @overload
 def read_part(
     path: str, 
-    iout: int, 
+    iout: int | None = None, 
     region: Region | np.ndarray | list | None = None, 
     cpulist: Sequence[int] | np.ndarray | None = None,
     target_fields: Sequence[str] | None = None,
@@ -444,7 +444,7 @@ def read_part(
 
 def read_part(
         path: str, 
-        iout: int, 
+        iout: int | None = None, 
         region: Region | np.ndarray | list | None = None, 
         cpulist: Sequence[int] | np.ndarray | None = None,
         target_fields: Sequence[str] | None = None,
@@ -468,7 +468,11 @@ def read_part(
     else:
         mp_backend = "thread"
 
-    output_dir = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout))
+    if iout is not None:
+        output_dir = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout))
+    else:
+        output_dir = path
+
     if dtype is None:
         try:
             dtype = read_type_descriptor(path, iout, 'part')
@@ -525,7 +529,7 @@ def read_part(
     args = path, iout, dtype_read, part_type
     
     if n_workers == 1:
-        result = _read_cpulist(
+        result = _read_from_cpulist(
             args,
             cpulist,
             dtype_out,
@@ -533,7 +537,7 @@ def read_part(
             _load_part_file
         )
     else:
-        result = _read_cpulist_mp(
+        result = _read_from_cpulist_mp(
             args,
             cpulist,
             dtype_out,
@@ -553,6 +557,29 @@ def read_part(
     return result
 
 
+def _read_with_format(f, data, dtype_read):
+    dtype_out = data.dtype
+    for name in dtype_read.names:
+        if name not in dtype_out.names:
+            f.skip_records(1)
+            continue
+
+        dtype_format = dtype_out.fields[name][0]
+        if np.issubdtype(dtype_format, np.integer):
+            arr = f.read_ints(dtype_format)
+        elif np.issubdtype(dtype_format, np.floating):
+            arr = f.read_reals(dtype_format)
+        else:
+            raise TypeError(f"Unsupported data type: {dtype_format}")
+
+        if arr.size != data.shape[0]:
+            raise RuntimeError(
+                f"Unexpected size for field '{name}' on CPU {icpu}: "
+                f"got {arr.size}, expected {data.shape[0]}"
+            )
+        data[name][:] = arr
+
+
 def _load_part_file(icpu, output_arr, path, iout, dtype_read, part_type=None):
 
     dtype_out = output_arr.dtype
@@ -569,25 +596,7 @@ def _load_part_file(icpu, output_arr, path, iout, dtype_read, part_type=None):
             # npart_cpu may be larger than npart
             part_data = np.empty(npart_file, dtype=dtype_out)
 
-        for name in dtype_read.names:
-            if name not in dtype_out.names:
-                f.skip_records(1)
-                continue
-
-            dtype_format = dtype_out.fields[name][0]
-            if np.issubdtype(dtype_format, np.integer):
-                arr = f.read_ints(dtype_format)
-            elif np.issubdtype(dtype_format, np.floating):
-                arr = f.read_reals(dtype_format)
-            else:
-                raise TypeError(f"Unsupported data type for field '{name}': {dtype_format}")
-
-            if arr.size != npart_file:
-                raise RuntimeError(
-                    f"Unexpected size for field '{name}' on CPU {icpu}: "
-                    f"got {arr.size}, expected {npart_file}"
-                )
-            part_data[name] = arr
+        _read_with_format(f, part_data, dtype_read)
         
         if get_vname('cpu') in dtype_out.names:
             part_data[get_vname('cpu')] = icpu
@@ -598,7 +607,7 @@ def _load_part_file(icpu, output_arr, path, iout, dtype_read, part_type=None):
             output_arr[:] = part_data
 
 
-def read_ncell_per_cpu(path, iout, cpulist=None, info=None, read_branch=False) -> Sequence[int]:
+def read_ncell_per_cpu(path, iout, cpulist=None, info=None, read_branch=False) -> np.ndarray:
     if info is None:
         info = get_info(path, iout)
     if cpulist is None:
@@ -645,17 +654,17 @@ def read_ncell_per_cpu(path, iout, cpulist=None, info=None, read_branch=False) -
                     f.skip_records(3 * (twotondim + ndim) + 1)
 
         ncell_cpu.append(ncell)
-    return ncell_cpu
+    return np.array(ncell_cpu)
 
 
 @overload
 def read_cell(
     path: str,
-    iout: int,
+    iout: int | None = None,
     region: Region | np.ndarray | list | None = None,
     cpulist: Sequence[int] | np.ndarray | None = None,
     target_fields: Sequence[str] | None = None,
-    dtype=None,
+    dtype_hydro = None,
     info: dict | None = None,
     read_hydro: bool = True,
     read_grav: bool = False,
@@ -670,11 +679,11 @@ def read_cell(
 @overload
 def read_cell(
     path: str,
-    iout: int,
+    iout: int | None = None,
     region: Region | np.ndarray | list | None = None,
     cpulist: Sequence[int] | np.ndarray | None = None,
     target_fields: Sequence[str] | None = None,
-    dtype=None,
+    dtype_hydro = None,
     info: dict | None = None,
     read_hydro: bool = True,
     read_grav: bool = False,
@@ -688,11 +697,11 @@ def read_cell(
 
 def read_cell(
         path: str, 
-        iout: int, 
+        iout: int | None = None, 
         region: Region | np.ndarray | list | None = None, 
         cpulist: Sequence[int] | np.ndarray | None = None,
         target_fields: Sequence[str] | None = None,
-        dtype=None,
+        dtype_hydro = None,
         info: dict | None = None,
         read_hydro=True,
         read_grav=False,
@@ -714,33 +723,38 @@ def read_cell(
     else:
         mp_backend = "thread"
 
-    output_name = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout))
-    fd_path = os.path.join(output_name, config['FILE_DESCRIPTOR_FORMAT'].format(data='hydro'))
-    if dtype is None:
-        try:
-            dtype = read_type_descriptor(path, iout, 'hydro')
-        except FileNotFoundError as e:
-            raise FileNotFoundError(
-                f"File descriptor not found: {fd_path}\n"
-                f"`dtype` may need to be provided manually. (e.g., [('rho', 'f8'), ('vx', 'f8'), ...])")
-
-    dtype = np.dtype(dtype)
+    if iout is not None:
+        output_name = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout))
+    else:
+        output_name = path
 
     dim_dtype = [(key, np.float64) for key in get_dim_keys()[:info['ndim']]]
-    dtype_out = np.dtype(dim_dtype + [(get_vname('level'), np.int32)])
+    descr_out = dim_dtype + [(get_vname('level'), np.int32)]
+    #dtype_out = np.dtype(dim_dtype + [(get_vname('level'), np.int32)])
 
     if read_hydro:
-        dtype_out = np.dtype(dtype_out.descr + dtype.descr)
+        fd_path = os.path.join(output_name, config['FILE_DESCRIPTOR_FORMAT'].format(data='hydro'))
+        if dtype_hydro is None:
+            try:
+                dtype_hydro = read_type_descriptor(path, iout, 'hydro')
+            except FileNotFoundError as e:
+                raise FileNotFoundError(
+                    f"File descriptor not found: {fd_path}\n"
+                    f"`dtype` may need to be provided manually. (e.g., [('rho', 'f8'), ('vx', 'f8'), ...])")
+
+        dtype_hydro = np.dtype(dtype_hydro)
+        descr_out = descr_out + dtype_hydro.descr
     
     if read_grav:
-        dtype_out = np.dtype(dtype_out.descr + [(get_vname('potential'), np.float64)])
+        descr_out = descr_out + [(get_vname('potential'), np.float64)]
     
     if read_cpu:
-        dtype_out = np.dtype(dtype_out.descr + [(get_vname('cpu'), np.int32)])
+        descr_out = descr_out + [(get_vname('cpu'), np.int32)]
     
+    dtype_out = np.dtype(descr_out)
+
     if target_fields is not None:
         dtype_out = np.dtype([(name, dtype_out.fields[name][0]) for name in target_fields if name in dtype_out.names])
-    
     
     if region is not None:
         if cpulist is not None:
@@ -761,10 +775,10 @@ def read_cell(
     if ncell == 0:
         return np.empty(0, dtype=dtype_out)
     
-    args = (path, iout, dtype, read_hydro, read_grav, read_branch, info)
+    args = (path, iout, dtype_hydro, read_hydro, read_grav, read_branch, info)
 
     if n_workers == 1:
-        result = _read_cpulist(
+        result = _read_from_cpulist(
             args,
             cpulist,
             dtype_out,
@@ -773,7 +787,7 @@ def read_cell(
         )
     
     else:
-        result = _read_cpulist_mp(
+        result = _read_from_cpulist_mp(
             args,
             cpulist,
             dtype_out,
@@ -949,7 +963,7 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
                     f_grav.skip_records(2 * ncpu_after + skip_grav * nloop_after)
 
 
-def _read_cpulist(
+def _read_from_cpulist(
         args: Tuple,
         cpulist: Sequence[int] | np.ndarray,
         dtype_out: np.dtype,
@@ -965,6 +979,8 @@ def _read_cpulist(
     for icpu, offset, ndata_cpu in zip(cpulist, offsets, ndata_per_cpu):
         if ndata_cpu == 0:
             continue
+
+        # call the loading function for this CPU slice
         func(
             icpu,
             data[offset:offset + ndata_cpu],
@@ -973,35 +989,43 @@ def _read_cpulist(
     return data
 
 
-def _load_data(args: Tuple) -> int:
-    (icpu, shm_name, shared_arr, dtype_out, ndata, offset, ndata_cpu, func, *rest) = args
+def _load_data_with_func(
+        ifile: int,
+        shm_name: str | None,
+        shared_arr: np.ndarray | None,
+        dtype_out: np.dtype,
+        ndata_tot: int,
+        offset: int,
+        ndata_cpu: int,
+        func: Callable,
+        *func_args) -> int:
 
     if ndata_cpu == 0:
         return 0
-    # Attach shared memory
 
+    # Attach shared memory
     if shm_name is not None:
         shm = SharedMemory(name=shm_name)
         try:
             shared_arr = np.ndarray(
-                (ndata,),
+                (ndata_tot,),
                 dtype=dtype_out,
                 buffer=shm.buf,
             )
             # view for this CPU slice
             output_arr = shared_arr[offset:offset + ndata_cpu]
-            func(icpu, output_arr, *rest)
+            func(ifile, output_arr, *func_args)
         finally:
             shm.close()
-    else:
+    elif shared_arr is not None:
         output_arr = shared_arr[offset:offset + ndata_cpu]
-        func(icpu, output_arr, *rest)
+        func(ifile, output_arr, *func_args)
 
     return ndata_cpu
 
 
-def _read_cpulist_mp(
-        args: Tuple,
+def _read_from_cpulist_mp(
+        func_args: Tuple,
         cpulist: Sequence[int] | np.ndarray,
         dtype_out: np.dtype,
         ndata_per_cpu: Sequence[int],
@@ -1030,12 +1054,12 @@ def _read_cpulist_mp(
             shared_arr = np.ndarray((ndata,), dtype=dtype_out, buffer=shm.buf)
             # Build job list for each CPU
             jobs = [
-                (int(icpu), shm.name, None, dtype_out, ndata, int(offset), int(ndata_cpu), func, *args)
+                (int(icpu), shm.name, None, dtype_out, ndata, int(offset), int(ndata_cpu), func, *func_args)
                 for icpu, offset, ndata_cpu in zip(cpulist, offsets, ndata_per_cpu)
                 if ndata_cpu > 0]
 
             with get_mp_executor(backend=mp_backend, n_workers=n_workers) as executor:
-                futures = [executor.submit(_load_data, job) for job in jobs]
+                futures = [executor.submit(_load_data_with_func, *job) for job in jobs]
 
                 # Propagate the first exception (if any)
                 for fut in as_completed(futures):
@@ -1064,13 +1088,13 @@ def _read_cpulist_mp(
         shared_arr = np.empty((ndata,), dtype=dtype_out)
         # Build job list for each CPU
         jobs = [
-            (int(icpu), None, shared_arr, dtype_out, ndata, int(offset), int(ndata_cpu), func, *args)
+            (int(icpu), None, shared_arr, dtype_out, ndata, int(offset), int(ndata_cpu), func, *func_args)
             for icpu, offset, ndata_cpu in zip(cpulist, offsets, ndata_per_cpu)
             if ndata_cpu > 0
         ]
 
         with get_mp_executor(backend=mp_backend, n_workers=n_workers) as executor:
-            futures = [executor.submit(_load_data, job) for job in jobs]
+            futures = [executor.submit(_load_data_with_func, *job) for job in jobs]
 
             # Propagate the first exception (if any)
             for fut in as_completed(futures):
@@ -1081,9 +1105,11 @@ def _read_cpulist_mp(
 
     return result
 
+
+# Functions for reading sink files
 def read_sink(
         path: str, 
-        iout: int,
+        iout: int | None = None,
         region: Region | np.ndarray | list | None = None, 
         icpu: int | None = None,
         target_fields: Sequence[str] | None = None,
@@ -1130,27 +1156,146 @@ def read_sink(
             return result
         f.skip_records(1)
 
-        for name in dtype.names:
-            if name not in dtype_out.names:
-                f.skip_records(1)
-                continue
-
-            dtype_format = dtype_out.fields[name][0]
-            if np.issubdtype(dtype_format, np.integer):
-                arr = f.read_ints(dtype_format)
-            elif np.issubdtype(dtype_format, np.floating):
-                arr = f.read_reals(dtype_format)
-            else:
-                raise TypeError(f"Unsupported data type for field '{name}': {dtype_format}")
-
-            if arr.size != nsink:
-                raise RuntimeError(
-                    f"Unexpected size for field '{name}' in sink file: "
-                    f"got {arr.size}, expected {nsink}"
-                )
-            result[name] = arr
+        _read_with_format(f, result, dtype)
     
     if exact_cut and region is not None:
         result = result[region.contains_data(result, cell=False)]
 
     return result
+
+
+# Functions for reading sink properties
+def _load_sinkprops_file(icoarse, output_arr, path, dtype_read):
+    filename = os.path.join(path, config['FILENAME_FORMAT_SINKPROPS'].format(icoarse=icoarse))
+    with FortranFile(filename, mode='r') as f:
+        f.skip_records(2)
+        aexp = f.read_reals()
+        unit_l = f.read_reals()
+        unit_d = f.read_reals()
+        unit_t = f.read_reals()
+        output_arr[get_vname('icoarse')][:] = icoarse
+        output_arr[get_vname('aexp')][:] = aexp
+        output_arr[get_vname('unit_l')][:] = unit_l
+        output_arr[get_vname('unit_d')][:] = unit_d
+        output_arr[get_vname('unit_t')][:] = unit_t
+        _read_with_format(f, output_arr[:], dtype_read)
+
+
+def read_nsinkprops_per_file(path: str, icoarse_read: Sequence[int] | np.ndarray) -> np.ndarray:
+    nsink_per_file = []
+    for icoarse in icoarse_read:
+        filename = os.path.join(path, config['FILENAME_FORMAT_SINKPROPS'].format(icoarse=icoarse))
+        with FortranFile(filename, mode='r') as f:
+            nsink = f.read_ints('i4')[0]
+            nsink_per_file.append(nsink)
+    return np.array(nsink_per_file)
+
+
+def read_sinkprops(
+        path: str,
+        icoarse_min: int | None = None,
+        icoarse_max: int | None = None,
+        dtype: np.dtype | list | None = None,
+        n_workers: int = config['DEFAULT_N_PROCS'],
+        use_process: bool = True,
+        copy_result: bool = True,
+):
+    
+    if use_process:
+        mp_backend = "process"
+    else:
+        mp_backend = "thread"
+
+    sinkprops_avail = glob.glob(os.path.join(path, config['FILENAME_FORMAT_SINKPROPS_ANY']))
+    icoarse_avail = np.array([int(os.path.basename(f).split('_')[1].split('.')[0]) for f in sinkprops_avail])
+    if icoarse_max is not None and icoarse_max < 0:
+        icoarse_max = np.max(icoarse_avail) + icoarse_max + 1
+    if icoarse_min is not None and icoarse_min < 0:
+        icoarse_min = np.max(icoarse_avail) + icoarse_min + 1
+    icoarse_read = icoarse_avail[
+        (icoarse_avail >= (icoarse_min if icoarse_min is not None else -np.inf)) &
+        (icoarse_avail <= (icoarse_max if icoarse_max is not None else np.inf))
+    ]
+
+    # dtype for formatted reading from sinkprops files; must be consistent with the file format
+    if dtype is None:
+        dtype = [(get_vname(field[0]), field[1]) for field in config['SINKPROPS_DTYPE']]
+    dtype = np.dtype(dtype)
+
+    # output dtype
+    dtype_out = np.dtype([(get_vname('icoarse'), np.int32), (get_vname('aexp'), np.float64), (get_vname('unit_l'), np.float64), (get_vname('unit_d'), np.float64), (get_vname('unit_t'), np.float64)] + dtype.descr)
+
+    if len(icoarse_read) == 0:
+        return np.empty(0, dtype=dtype_out)
+    
+    # get number of sink particles per file
+    nsink_per_file = read_nsinkprops_per_file(path, icoarse_read)
+    
+    # Total number of sink particles across all files
+    ndata_tot = np.sum(nsink_per_file)
+    if ndata_tot == 0:
+        return np.empty(0, dtype=dtype_out)
+    
+    # Precompute offsets for each file
+    offsets = np.zeros_like(nsink_per_file)
+    offsets[1:] = np.cumsum(nsink_per_file[:-1])
+    offsets = offsets.astype(int)
+
+    itemsize = dtype_out.itemsize
+    total_bytes = ndata_tot * itemsize
+    func_args = path, dtype
+
+    if mp_backend == "process" and n_workers > 1:
+        shm = SharedMemory(create=True, size=total_bytes)
+        try:
+            shared_arr = np.ndarray((ndata_tot,), dtype=dtype_out, buffer=shm.buf)
+
+            # Build job list for each file
+            jobs = [
+                (int(icoarse), shm.name, None, dtype_out, ndata_tot, int(offset), int(nsink_per_file[idx]), _load_sinkprops_file, *func_args)
+                for idx, (icoarse, offset) in enumerate(zip(icoarse_read, offsets))
+            ]
+
+            with get_mp_executor(backend="process", n_workers=n_workers) as executor:
+                futures = [executor.submit(_load_data_with_func, *job) for job in jobs]
+
+                # Propagate the first exception (if any)
+                for fut in as_completed(futures):
+                    exc = fut.exception()
+                    if exc is not None:
+                        raise exc
+
+            result = np.array(shared_arr, copy=True)
+            if copy_result:
+                result = np.array(shared_arr, copy=True)
+            else:
+                result = SharedView(shm, (ndata_tot,), dtype_out)
+
+        finally:
+            if copy_result:
+                try:
+                    shm.close()
+                except FileNotFoundError:
+                    pass
+                try:
+                    shm.unlink()
+                except FileNotFoundError:
+                    pass
+    else:
+        shared_arr = np.empty((ndata_tot,), dtype=dtype_out)
+        jobs = [
+            (int(icoarse), None, shared_arr, dtype_out, ndata_tot, int(offset), int(nsink_per_file[idx]), _load_sinkprops_file, *func_args)
+            for idx, (icoarse, offset) in enumerate(zip(icoarse_read, offsets))
+        ]
+        with get_mp_executor(backend="thread", n_workers=n_workers) as executor:
+            futures = [executor.submit(_load_data_with_func, *job) for job in jobs]
+            # Propagate the first exception (if any)
+            for fut in as_completed(futures):
+                exc = fut.exception()
+                if exc is not None:
+                    raise exc
+        result = shared_arr
+    
+    return result
+
+        
