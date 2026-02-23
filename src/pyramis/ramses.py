@@ -46,7 +46,7 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missi
         info = parse_info(info_path)
 
         for data in check_data:
-            file_pattern = os.path.join(d, config['FILENAME_FORMAT_ANY'].format(data=data, iout=iout))
+            file_pattern = os.path.join(d, config['FILENAME_FORMAT_RAMSES_ANY'].format(data=data, iout=iout))
             files = glob.glob(file_pattern)
             if len(files) != info['ncpu']:
                 if report_missing:
@@ -190,7 +190,7 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
     info['iout'] = iout
 
     if read_amr:
-        amr_files = glob.glob(os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_ANY'].format(data='amr', iout=iout)))
+        amr_files = glob.glob(os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES_ANY'].format(data='amr', iout=iout)))
         if len(amr_files) == 0:
             raise FileNotFoundError(f"No AMR file found at iout = {iout} in {output_path}.")
 
@@ -254,7 +254,7 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
         info['kcoarse_min'] = coarse_min[2]
 
     if read_hydro:
-        hydro_files = glob.glob(os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_ANY'].format(data='hydro', iout=iout)))
+        hydro_files = glob.glob(os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES_ANY'].format(data='hydro', iout=iout)))
         if len(hydro_files) > 0:
             hydro_path = hydro_files[0]
             with FortranFile(hydro_path, mode='r') as f:
@@ -285,7 +285,7 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
 
 
 def get_data_path(data_name, path, iout, icpu):
-    return os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT'].format(data=data_name, iout=iout, icpu=icpu))
+    return os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES'].format(data=data_name, iout=iout, icpu=icpu))
 
 def _read_npart_file(path, iout, icpu, part_type, family_exists, is_star):
     filename = get_data_path('part', path, iout, icpu)
@@ -583,7 +583,7 @@ def _read_with_format(f, data, dtype_read):
 def _load_part_file(icpu, output_arr, path, iout, dtype_read, part_type=None):
 
     dtype_out = output_arr.dtype
-    filename = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT'].format(data='part', iout=iout, icpu=icpu))
+    filename = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES'].format(data='part', iout=iout, icpu=icpu))
 
     with FortranFile(filename, mode="r") as f:
         f.skip_records(2)
@@ -622,7 +622,7 @@ def read_ncell_per_cpu(path, iout, cpulist=None, info=None, read_branch=False) -
 
     ncell_cpu = []
     for icpu in cpulist:
-        filename = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT'].format(data='amr', iout=iout, icpu=icpu))
+        filename = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES'].format(data='amr', iout=iout, icpu=icpu))
         ngridfile = np.empty((nlevelmax, ncpu + nboundary), dtype=np.int32)
         ncell = 0
         with FortranFile(filename, mode='r') as f:
@@ -841,9 +841,9 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
 
     mask_hvar = np.isin(dtype_hydro.names, dtype_out.names)
 
-    filename_amr = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT'].format(data='amr', iout=iout, icpu=icpu))
-    filename_hydro = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT'].format(data='hydro', iout=iout, icpu=icpu))
-    filename_grav = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT'].format(data='grav', iout=iout, icpu=icpu))
+    filename_amr = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES'].format(data='amr', iout=iout, icpu=icpu))
+    filename_hydro = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES'].format(data='hydro', iout=iout, icpu=icpu))
+    filename_grav = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES'].format(data='grav', iout=iout, icpu=icpu))
 
     cursor = 0
 
@@ -1140,12 +1140,12 @@ def read_sink(
         dtype_out = np.dtype([(name, dtype_out.fields[name][0]) for name in target_fields if name in dtype_out.names])
     
     if icpu is None:
-        sink_files = glob.glob(os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_ANY'].format(data='sink', iout=iout)))
+        sink_files = glob.glob(os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES_ANY'].format(data='sink', iout=iout)))
         if len(sink_files) == 0:
             return np.empty(0, dtype=dtype_out)
         filename = sink_files[0]
     else:
-        filename = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT'].format(data='sink', iout=iout, icpu=icpu))
+        filename = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES'].format(data='sink', iout=iout, icpu=icpu))
         if not os.path.exists(filename):
             return np.empty(0, dtype=dtype_out)
 

@@ -11,14 +11,14 @@ from typing import Optional, Tuple
 
 from pyramis.utils import Timestamp, hilbert3d_map
 from pyramis.utils.arrayview import SharedView
-from pyramis import io, get_dim_keys
+from pyramis import get_dim_keys, ramses
 import tomllib
 
-io.config['VNAME_SET'] = 'native' # Recommended to use native variable names
+ramses.config['VNAME_SET'] = 'native' # Recommended to use native variable names
 
 
 def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=False, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8, update_attributes=False):
-    info = io.get_info(path, iout)
+    info = ramses.get_info(path, iout)
 
     if cpu_list is None:
         cpu_list = np.arange(1, info['ncpu'] + 1, dtype='i4')
@@ -100,18 +100,18 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
     Get a new dictionary to store particle data for each type.
     """
     names = converted_dtypes.keys()
-    info = io.get_info(path, iout)
+    info = ramses.get_info(path, iout)
 
     # pre-define the new particle array based on the snapshot header
     new_part_dict = {}
     pointer_dict = {}
 
     #header = snap.extract_header()    
-    header = io.read_npart_header(path, iout)
+    header = ramses.read_npart_header(path, iout)
     for name in names:
         if name == 'sink':
             try:
-                part = io.read_sink(path=path, iout=iout)
+                part = ramses.read_sink(path=path, iout=iout)
                 header[name] = part.size if part is not None else 0
             except ValueError:
                 print(f"No sink data available for iout = {iout}. Skipping sink export.")
@@ -131,13 +131,13 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
         if len(cpu_list_sub) == 0:
             continue
 
-        part_data = io.read_part(path=path, iout=iout, cpulist=cpu_list_sub, read_cpu=True, n_workers=nthread, use_process=True, copy_result=False)
+        part_data = ramses.read_part(path=path, iout=iout, cpulist=cpu_list_sub, read_cpu=True, n_workers=nthread, use_process=True, copy_result=False)
 
         if part_data is None:
             raise ValueError("Particle not loaded in snapshot")
         
         # sort the particle data in each hilbert domain to save sorting time later
-        npart_per_cpu = io.read_npart_per_cpu(path, iout, cpu_list_sub)
+        npart_per_cpu = ramses.read_npart_per_cpu(path, iout, cpu_list_sub)
         for offset, n in zip(np.cumsum(npart_per_cpu), npart_per_cpu):
             part_slice = part_data[offset - n:offset]
             hkey = get_hilbert_key(np.asarray([part_slice[key] for key in get_dim_keys()]).T, info['nlevelmax'], nthread=nthread)
@@ -149,13 +149,13 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
             new_dtypes = converted_dtypes[name]
             if name == 'sink':
                 if pointer_dict[name] == 0: # we load sink data only once
-                    part = io.read_sink(path=path, iout=iout)
+                    part = ramses.read_sink(path=path, iout=iout)
                     hilbert_key = get_hilbert_key(np.asarray([part[key] for key in get_dim_keys()]).T, info['nlevelmax'], nthread=nthread)
                     part = part[np.argsort(hilbert_key)] # already Particle class at this point
                 else: # sink data is alrady loaded
                     continue
             else:
-                part = part_data[io.mask_by_part_type(part_data, name)]
+                part = part_data[ramses.mask_by_part_type(part_data, name)]
                 #part = uri.Particle(part_data, snap)[name]
 
             timer.message(f"Exporting {name} data with {part.size} particles..."
@@ -189,7 +189,7 @@ def create_hdf5_cell(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
     """
     Export cell data from the snapshot to HDF5 format.
     """
-    info = io.get_info(path, iout)
+    info = ramses.get_info(path, iout)
     if cpu_list is None:
         cpu_list = np.arange(1, info['ncpu'] + 1, dtype='i4')
     else:
@@ -266,13 +266,13 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
     Get a new array to store cell data.
     """
 
-    info = io.get_info(path, iout)
+    info = ramses.get_info(path, iout)
 
     new_cell = None
     pointer = 0
 
     timer.message(f"Calculating total number of cells for iout = {iout} with {len(cpu_list)} CPUs...")
-    n_cell = np.sum(io.read_ncell_per_cpu(path, iout, cpulist=cpu_list, read_branch=read_branch))
+    n_cell = np.sum(ramses.read_ncell_per_cpu(path, iout, cpulist=cpu_list, read_branch=read_branch))
 
     new_dtypes = [tuple(d) for d in converted_dtypes]
     new_cell = np.empty(n_cell, dtype=new_dtypes)
@@ -284,10 +284,10 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
         cpu_list_sub = cpu_list[idx:np.minimum(idx + size_load, len(cpu_list))]
         if len(cpu_list_sub) == 0:
             continue
-        cell_data = io.read_cell(path=path, iout=iout, cpulist=cpu_list_sub, read_branch=read_branch, read_hydro=True, read_grav=True, read_cpu=True, n_workers=nthread, use_process=True, copy_result=False)
+        cell_data = ramses.read_cell(path=path, iout=iout, cpulist=cpu_list_sub, read_branch=read_branch, read_hydro=True, read_grav=True, read_cpu=True, n_workers=nthread, use_process=True, copy_result=False)
 
         # sort the cell data in each hilbert domain to save sorting time later
-        ncell_per_cpu = io.read_ncell_per_cpu(path, iout, cpu_list_sub, read_branch=read_branch)
+        ncell_per_cpu = ramses.read_ncell_per_cpu(path, iout, cpu_list_sub, read_branch=read_branch)
         for offset, n in zip(np.cumsum(ncell_per_cpu), ncell_per_cpu):
             cell_slice = cell_data[offset - n:offset]
             hkey = get_hilbert_key(np.asarray([cell_slice[key] for key in get_dim_keys()]).T, info['nlevelmax'], nthread=nthread)
@@ -311,14 +311,14 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
     This function will export both particle and cell data.
     """
 
-    vname_abbr = io.config['VNAME_MAPPING'][io.config['VNAME_SET']]
-    iout_avail = io.check_snapshots(path, check_data=['amr', 'hydro', 'part', 'grav'])['iout']
+    vname_abbr = ramses.config['VNAME_MAPPING'][ramses.config['VNAME_SET']]
+    iout_avail = ramses.check_snapshots(path, check_data=['amr', 'hydro', 'part', 'grav'])['iout']
     if iout_list is None:
         iout_list = iout_avail
     else:
         iout_list = iout_list[np.isin(iout_list, iout_avail)]
 
-    info = io.get_info(path, iout_list[0])
+    info = ramses.get_info(path, iout_list[0])
     if size_load <= 0:
         size_load = info['ncpu']
 
@@ -327,7 +327,7 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
         # remove unnecessary fields per perticle type
         if converted_dtypes_part is None and convert_part:
             converted_dtypes_part = {}
-            dtype_part = io.read_part(path, iout, cpulist=[1], read_cpu=True).dtype
+            dtype_part = ramses.read_part(path, iout, cpulist=[1], read_cpu=True).dtype
             for name in ['star', 'dm', 'cloud', 'tracer']:
                 new_dtype = []
                 for key, fmt in dtype_part.descr:
@@ -352,8 +352,8 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
                     new_dtype.append((key, new_fmt))
                 converted_dtypes_part[name] = new_dtype
             
-            if os.path.exists(io.config['FILENAME_FORMAT'].format(data='sink', iout=iout, icpu=1)):
-                dtype_sink = io.read_sink(path, iout).dtype
+            if os.path.exists(ramses.config['FILENAME_FORMAT'].format(data='sink', iout=iout, icpu=1)):
+                dtype_sink = ramses.read_sink(path, iout).dtype
                 new_dtype = []
                 for desc in dtype_sink.descr:
                     key = desc[0]
@@ -368,7 +368,7 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
             
         if converted_dtypes_cell is None and convert_cell:
             converted_dtypes_cell = {}
-            dtype_cell = io.read_cell(path, iout, cpulist=[1], read_hydro=True, read_grav=True, read_cpu=True).dtype
+            dtype_cell = ramses.read_cell(path, iout, cpulist=[1], read_hydro=True, read_grav=True, read_cpu=True).dtype
             for name in ['cell']:
                 new_dtype = []
                 for key, fmt in dtype_cell.descr:
@@ -482,7 +482,7 @@ def add_basic_attrs(fl: h5py.File, info: dict):
     add_attr_with_descr(fl, 'unit_v', info['unit_l'] / info['unit_t'], 'Unit of velocity in cm/s.')
     add_attr_with_descr(fl, 'unit_p', info['unit_d'] * info['unit_l']**2 / info['unit_t']**2, 'Unit of pressure in g/(cm*s^2).')
 
-    add_attr_with_descr(fl, 'vname_set', io.config['VNAME_SET'], 'Variable name set used in the file.')
+    add_attr_with_descr(fl, 'vname_set', ramses.config['VNAME_SET'], 'Variable name set used in the file.')
     add_attr_with_descr(fl, 'aout', info.get('aout', []), 'List of scheduled output scale factors in the simulation.')
     add_attr_with_descr(fl, 'tout', info.get('tout', []), 'List of available output indices in the simulation.')
 

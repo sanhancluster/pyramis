@@ -10,4 +10,4 @@ if config['DEFAULT_N_PROCS'] == 'auto':
     config['DEFAULT_N_PROCS'] = len(os.sched_getaffinity(0))
 
 from .basic import *
-from . import geometry, image, hdf, ramses, utils, halo
+from . import geometry, halo_finder, image, hdf, ramses, utils

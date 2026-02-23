@@ -12,7 +12,7 @@ from .core import compute_chunk_list_from_hilbert
 from .geometry import Region, Box
 from .utils.arrayview import SharedView
 from .utils import get_mp_executor
-from. import io
+from. import ramses
 from .astro import get_cosmo_table, cosmo_convert
 
 from multiprocessing.shared_memory import SharedMemory
@@ -191,6 +191,7 @@ def _chunk_slice_hdf_mp(
     mp_backend="process",
     copy_result=True,
     is_cell=False,
+    vname_set='native',
     use_vname_mapping=True,
 ):
 
@@ -202,7 +203,7 @@ def _chunk_slice_hdf_mp(
 
     # Read only meta-info once in the parent
     with h5py.File(path, "r") as f:
-        _, dtype_out, target_fields, starts, ends = _prepare_hdf_read(f, group_name, boundary_name, chunk_indices, chunk_sizes, target_fields, use_vname_mapping)
+        _, dtype_out, target_fields, starts, ends = _prepare_hdf_read(f, group_name, boundary_name, chunk_indices, chunk_sizes, target_fields, vname_set, use_vname_mapping)
 
     if region is not None:
         # Compute exact sizes by filtering with region in parallel
@@ -301,10 +302,11 @@ def _chunk_slice_hdf(
         boundary_name='chunk_boundary', 
         target_fields=None,
         is_cell=False,
+        vname_set='native',
         use_vname_mapping=True) -> np.ndarray:
 
     with h5py.File(path, 'r') as f:
-        data, dtype_out, target_fields, starts, ends = _prepare_hdf_read(f, group_name, boundary_name, chunk_indices, chunk_sizes, target_fields, use_vname_mapping)
+        data, dtype_out, target_fields, starts, ends = _prepare_hdf_read(f, group_name, boundary_name, chunk_indices, chunk_sizes, target_fields, vname_set, use_vname_mapping)
 
         # Read and filter each chunk
         boxsize = f.attrs.get('boxsize', 1.0)
@@ -319,9 +321,9 @@ def _chunk_slice_hdf(
     return output
 
 
-def _prepare_hdf_read(f, group_name, boundary_name, chunk_indices, chunk_sizes, target_fields, use_vname_mapping):
+def _prepare_hdf_read(f, group_name, boundary_name, chunk_indices, chunk_sizes, target_fields, vname_set, use_vname_mapping):
     vname_set_file = f.attrs.get('vname_set', 'native')
-    if vname_set_file == config['VNAME_SET']:
+    if vname_set_file == vname_set:
         use_vname_mapping = False
     group = get_by_type(f, group_name, h5py.Group)
     data = get_by_type(group, 'data', h5py.Dataset)
@@ -329,10 +331,10 @@ def _prepare_hdf_read(f, group_name, boundary_name, chunk_indices, chunk_sizes, 
     starts, ends = bounds[chunk_indices], bounds[chunk_indices + chunk_sizes]
 
     dtype_file = data.dtype
-    mapping = get_mapping(vname_set_file, config['VNAME_SET'])
+    mapping = get_mapping(vname_set_file, vname_set)
     if target_fields is not None:
         if use_vname_mapping:
-            mapping_reverse = get_mapping(config['VNAME_SET'], vname_set_file)
+            mapping_reverse = get_mapping(vname_set, vname_set_file)
             target_fields_file = [mapping_reverse.get(f, f) for f in target_fields if mapping_reverse.get(f, f) in dtype_file.names]
         else:
             target_fields_file = target_fields
@@ -358,7 +360,11 @@ def read_hdf(
         use_process=True,
         copy_result=True,
         is_cell=False,
+        vname_set=None,
         use_vname_mapping=True):
+    
+    if vname_set is None:
+        vname_set = config['VNAME_SET']
 
     if use_process:
         mp_backend = "process"
@@ -410,11 +416,11 @@ def read_hdf(
     if n_workers == 1:
         if not exact_cut:
             region = None
-        result = _chunk_slice_hdf(filename, name, chunk_indices, chunk_sizes=chunk_sizes, region=region, target_fields=target_fields, is_cell=is_cell, use_vname_mapping=use_vname_mapping)
+        result = _chunk_slice_hdf(filename, name, chunk_indices, chunk_sizes=chunk_sizes, region=region, target_fields=target_fields, is_cell=is_cell, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
     else:
         if not exact_cut:
             region = None
-        result = _chunk_slice_hdf_mp(filename, name, chunk_indices, chunk_sizes=chunk_sizes, region=region, target_fields=target_fields, n_workers=n_workers, mp_backend=mp_backend, copy_result=copy_result, is_cell=is_cell, use_vname_mapping=use_vname_mapping)
+        result = _chunk_slice_hdf_mp(filename, name, chunk_indices, chunk_sizes=chunk_sizes, region=region, target_fields=target_fields, n_workers=n_workers, mp_backend=mp_backend, copy_result=copy_result, is_cell=is_cell, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
     return result
 
 
@@ -425,9 +431,10 @@ def read_part(
         region: Region | np.ndarray | list | None=None,
         target_fields=None,
         exact_cut=True,
-        n_workers=config['DEFAULT_N_PROCS'],
+        n_workers=None,
         use_process=True,
         copy_result=True,
+        vname_set=None,
         use_vname_mapping=True):
     """
     Read particle data from HDF5 file.
@@ -461,11 +468,17 @@ def read_part(
         Array of particle data.
     """
 
+    if vname_set is None:
+        vname_set = config['VNAME_SET']
+
+    if n_workers is None:
+        n_workers = config['DEFAULT_N_PROCS']
+
     if iout is None:
         filename = path
     else:
         filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data='part', iout=iout))
-    data = read_hdf(filename, part_type, region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=False, use_vname_mapping=use_vname_mapping)
+    data = read_hdf(filename, part_type, region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=False, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
     return data
 
 
@@ -476,10 +489,11 @@ def read_cell(
         target_fields=None,
         levelmax_load=None,
         exact_cut=True,
-        n_workers=config['DEFAULT_N_PROCS'],
+        n_workers=None,
         use_process=True,
         copy_result=True,
         read_branch=False,
+        vname_set=None,
         use_vname_mapping=True):
     """
     Read cell data from HDF5 file.
@@ -514,68 +528,70 @@ def read_cell(
     np.ndarray
         Array of cell data.
     """
+
+    if vname_set is None:
+        vname_set = config['VNAME_SET']
+
+    if n_workers is None:
+        n_workers = config['DEFAULT_N_PROCS']
     
     if iout is None:
         filename = path
     else:
         filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data='cell', iout=iout))
     if levelmax_load is not None:
-        data_leaf = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmax=levelmax_load, use_process=use_process, copy_result=copy_result, is_cell=True, use_vname_mapping=use_vname_mapping)
-        data_branch = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmin=levelmax_load, levelmax=levelmax_load, use_process=use_process, copy_result=copy_result, is_cell=True, use_vname_mapping=use_vname_mapping)
+        data_leaf = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmax=levelmax_load, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
+        data_branch = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmin=levelmax_load, levelmax=levelmax_load, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
         data = np.concatenate([data_leaf, data_branch])
     elif read_branch:
-        data = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=True, use_vname_mapping=use_vname_mapping)
+        data = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
     else:
-        data = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=True, use_vname_mapping=use_vname_mapping)
+        data = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
 
     return data
 
 
-def read_star(path: str, iout: int | None=None, region: Region | np.ndarray | list | None=None,
-              target_fields=None, exact_cut=True, n_workers=config['DEFAULT_N_PROCS'],
-              use_process=True, copy_result=True, use_vname_mapping=True):
-    """
-    Read star particle data from HDF5 file.
-    """
-    return read_part(path, 'star', iout=iout, region=region, target_fields=target_fields, 
-                     exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, 
-                     copy_result=copy_result, use_vname_mapping=use_vname_mapping)
+def _generate_part_reader(part_type: str):
+    def _reader(
+        path: str,
+        iout: int | None = None,
+        region: Region | np.ndarray | list | None = None,
+        target_fields=None,
+        exact_cut: bool = True,
+        n_workers=None,
+        use_process: bool = True,
+        copy_result: bool = True,
+        vname_set=None,
+        use_vname_mapping: bool = True,
+    ):
+        return read_part(
+            path,
+            part_type,
+            iout=iout,
+            region=region,
+            target_fields=target_fields,
+            exact_cut=exact_cut,
+            n_workers=n_workers,
+            use_process=use_process,
+            copy_result=copy_result,
+            vname_set=vname_set,
+            use_vname_mapping=use_vname_mapping,
+        )
 
-def read_dm(path: str, iout: int | None=None, region: Region | np.ndarray | list | None=None,
-              target_fields=None, exact_cut=True, n_workers=config['DEFAULT_N_PROCS'],
-              use_process=True, copy_result=True, use_vname_mapping=True):
-    """
-    Read dark matter particle data from HDF5 file.
-    """
-    return read_part(path, 'dm', iout=iout, region=region, target_fields=target_fields, 
-                     exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, 
-                     copy_result=copy_result, use_vname_mapping=use_vname_mapping)
+    return _reader
 
-def read_sink(path: str, iout: int | None=None, region: Region | np.ndarray | list | None=None,
-              target_fields=None, exact_cut=True, n_workers=config['DEFAULT_N_PROCS'],
-              use_process=True, copy_result=True, use_vname_mapping=True):
-    """
-    Read sink particle data from HDF5 file.
-    """
-    return read_part(path, 'sink', iout=iout, region=region, target_fields=target_fields, 
-                     exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, 
-                     copy_result=copy_result, use_vname_mapping=use_vname_mapping)
-
-def read_tracer(path: str, iout: int | None=None, region: Region | np.ndarray | list | None=None,
-              target_fields=None, exact_cut=True, n_workers=config['DEFAULT_N_PROCS'],
-              use_process=True, copy_result=True, use_vname_mapping=True):
-    """
-    Read tracer particle data from HDF5 file.
-    """
-    return read_part(path, 'tracer', iout=iout, region=region, target_fields=target_fields, 
-                     exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, 
-                     copy_result=copy_result, use_vname_mapping=use_vname_mapping)
+read_star = _generate_part_reader("star")
+read_dm = _generate_part_reader("dm")
+read_sink = _generate_part_reader("sink")
+read_tracer = _generate_part_reader("tracer")
 
 
 def read_sinkprops(path: str, filename='SINKPROPS/sinkprops.h5', target_id: int | Sequence[int] | np.ndarray=None,
-                   icoarse_min: int | None=None, icoarse_max:int | None=None, target_fields=None, use_vname_mapping=True):
+                   icoarse_min: int | None=None, icoarse_max:int | None=None, target_fields=None, vname_set=None, use_vname_mapping=True):
     filename = os.path.join(path, filename)
 
+    if vname_set is None:
+        vname_set = config['VNAME_SET']
 
     with h5py.File(filename, 'r') as f:
         data = get_by_type(f, 'data', h5py.Dataset)
@@ -587,9 +603,9 @@ def read_sinkprops(path: str, filename='SINKPROPS/sinkprops.h5', target_id: int 
             icoarse_min = f.attrs.get('icoarse_max', 0) + icoarse_min + 1
 
         vname_set_file = f.attrs.get('vname_set', 'native')
-        mapping = get_mapping(vname_set_file, config['VNAME_SET'])
+        mapping = get_mapping(vname_set_file, vname_set)
         if target_fields is not None:
-            mapping_reverse = get_mapping(config['VNAME_SET'], vname_set_file)
+            mapping_reverse = get_mapping(vname_set, vname_set_file)
             target_fields_file = [mapping_reverse.get(f, f) for f in target_fields if mapping_reverse.get(f, f) in dtype_file.names]
         else:
             target_fields_file = None

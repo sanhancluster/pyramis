@@ -25,10 +25,14 @@ def _load_packaged_toml(name: str) -> dict[str, Any]:
     with files(__package__).joinpath(name).open("rb") as f:
         return tomllib.load(f)
 
+def _load_external_toml(path: str) -> dict[str, Any]:
+    with open(path, "rb") as f:
+        return tomllib.load(f)
+
 def load_config() -> dict[str, Any]:
     config = _load_packaged_toml(BASE_CONFIG)
     try:
-        override = _load_packaged_toml(CONFIG)
+        override = _load_external_toml(CONFIG)
     except FileNotFoundError:
         return config
     return _deep_update(config, override)

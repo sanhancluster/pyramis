@@ -13,7 +13,7 @@ def export_hdf(repo: str, output_path='SINKPROPS/sinkprops.h5', h5py_kwargs=None
         h5py_kwargs = dict(compression='lzf', chunks=True, shuffle=True)
 
     timer.start("Reading sink properties from RAMSES snapshots")
-    sp = pyr.io.read_sinkprops(repo, use_process=True, copy_result=True)
+    sp = pyr.ramses.read_sinkprops(repo, use_process=True, copy_result=True)
     timer.record("Finished reading sink properties from RAMSES snapshots")
 
     timer.start("Processing sink properties")
