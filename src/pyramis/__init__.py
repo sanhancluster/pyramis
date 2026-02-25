@@ -1,8 +1,8 @@
 import os
-from .config_module import set_config, get_config
+from .config_module import get_config, set_config, load_config, _config as config
 from types import SimpleNamespace
 
-config = get_config()
+load_config()
 cgs_unit = SimpleNamespace(**config['CGS_UNIT'])
 cgs_constants = SimpleNamespace(**config['CGS_CONSTANTS'])
 
