@@ -604,6 +604,7 @@ def read_sinkprops(path: str, filename='SINKPROPS/sinkprops.h5', target_id: int 
 
         vname_set_file = f.attrs.get('vname_set', 'native')
         mapping = get_mapping(vname_set_file, vname_set)
+        mapping_reverse = None
         if target_fields is not None:
             mapping_reverse = get_mapping(vname_set, vname_set_file)
             target_fields_file = [mapping_reverse.get(f, f) for f in target_fields if mapping_reverse.get(f, f) in dtype_file.names]
@@ -614,7 +615,9 @@ def read_sinkprops(path: str, filename='SINKPROPS/sinkprops.h5', target_id: int 
 
         if target_id is not None:
             sinks = get_by_type(f, 'sinks', h5py.Dataset)
-            id_field_name = mapping.get('identity', 'identity')
+            if mapping_reverse is None:
+                mapping_reverse = get_mapping(vname_set, vname_set_file)
+            id_field_name = mapping_reverse.get('identity', 'identity') if use_vname_mapping else 'identity'
             if id_field_name not in sinks.dtype.names:
                 raise ValueError(f"ID field '{id_field_name}' not found in sinkprops dataset.")
             id_data = sinks[id_field_name]
@@ -659,7 +662,7 @@ def read_sinkprops(path: str, filename='SINKPROPS/sinkprops.h5', target_id: int 
                 data_array = data[key_array]
             else:
                 data_array = data
-
+        data_array = data_array[:]
     return data_array.view(dtype_out)
 
 
