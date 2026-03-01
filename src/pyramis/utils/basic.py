@@ -5,7 +5,6 @@ import multiprocessing as mp
 import time
 import sys
 
-DEFAULT_N_PROCS = config['DEFAULT_N_PROCS']
 
 def in_jupyter():
     try:
@@ -24,7 +23,10 @@ def get_mp_context():
         return mp.get_context("spawn")
 
 
-def get_mp_executor(backend: str="thread", n_workers: int=DEFAULT_N_PROCS):
+def get_mp_executor(backend: str="thread", n_workers: int=None):
+    if n_workers is None:
+        n_workers = config['DEFAULT_N_PROCS']
+
     ctx = get_mp_context()
 
     Executor = ProcessPoolExecutor if backend == "process" else ThreadPoolExecutor
@@ -43,13 +45,13 @@ class Timestamp:
     """
     A class to export time that took to execute the script.
     """
-    def __init__(self, use_color=None, log_path=None):
+    def __init__(self, use_color=None, log_path=None, verbose_level=1):
         self.t0 = time.time()
         self.stamps = {}
         self.stamps['start'] = self.t0
         self.stamps['last'] = self.t0
         self.stat = {}
-        self.verbose = 1
+        self.verbose = verbose_level
         if use_color is None:
             self.use_color = sys.stdout.isatty()
         else:

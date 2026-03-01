@@ -135,15 +135,15 @@ def read_halomaker(
 def read_halomaker_members(
         path:str,
         iout:int | None=None,
-        idlist:int | Sequence[int] | np.ndarray | None=None,
+        target_id:int | Sequence[int] | np.ndarray | None=None,
         galaxy=False,
         double_precision: bool=True,
         return_nparts=False) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
 
     nskip = _get_halomaker_skip(galaxy=galaxy, double_precision=double_precision)
 
-    if idlist is not None:
-        idlist = np.atleast_1d(idlist)
+    if target_id is not None:
+        target_id = np.atleast_1d(target_id)
 
     if iout is not None:
         if galaxy:
@@ -169,10 +169,10 @@ def read_halomaker_members(
 
     # Build the output array and offsets for reading the particle IDs
     nparts_arr = np.array(nparts_arr)
-    if idlist is not None:
+    if target_id is not None:
         # idlist = idlist[np.isin(idlist, idlist_all)]
-        indices = np.searchsorted(idlist_all, idlist)
-        nparts_arr = np.array([(nparts_arr[idx] if id in idlist_all else 0) for idx, id in zip(indices, idlist)])
+        indices = np.searchsorted(idlist_all, target_id)
+        nparts_arr = np.array([(nparts_arr[idx] if id in idlist_all else 0) for idx, id in zip(indices, target_id)])
 
     offsets_out = np.concatenate(([0], np.cumsum(nparts_arr[:-1])))
     nparts_out = np.sum(nparts_arr)
@@ -182,8 +182,8 @@ def read_halomaker_members(
     with FortranFile(path, 'r') as f:
         f.skip_records(6)
         for ihalo in range(1, nhalo_snap+1):
-            if idlist is None or ihalo in idlist:
-                idx = np.where(idlist == ihalo)[0][0] if idlist is not None else ihalo - 1
+            if target_id is None or ihalo in target_id:
+                idx = np.where(target_id == ihalo)[0][0] if target_id is not None else ihalo - 1
                 f.skip_records(1) # skip nparts
                 read = f.read_ints() # read members
                 members[offsets_out[idx]:offsets_out[idx]+nparts_arr[idx]] = read

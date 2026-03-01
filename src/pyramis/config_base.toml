@@ -2,7 +2,7 @@
 # Except for directory paths, changing the file name formats are not recommended.
 
 ## Verbosity level for logging. Higher values will produce more detailed logs.
-VERBOSITY = 1
+VERBOSE_LEVEL = 1
 
 ## Directory paths for input and output data. You can change these to match your directory structure.
 OUTPUT_FORMAT = "output_{iout:05d}"

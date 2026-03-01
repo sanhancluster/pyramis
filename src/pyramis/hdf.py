@@ -7,7 +7,7 @@ from typing import Sequence
 from concurrent.futures import as_completed
 import warnings
 
-from . import config, get_dim_keys, get_vname, get_mapping, cgs_unit
+from . import config, get_dim_keys, get_vname, get_mapping, cgs_unit, timer
 from .core import compute_chunk_list_from_hilbert
 from .geometry import Region, Box
 from .utils.arrayview import SharedView
@@ -19,6 +19,7 @@ from multiprocessing.shared_memory import SharedMemory
 
 
 def check_snapshots(path: str, check_data=['cell', 'part']) -> np.ndarray:
+    timer.start(f"Checking HDF snapshots at {path} for {check_data}...")
     iout_list = None
     for data in check_data:
         pattern = config['FILENAME_FORMAT_HDF_ANY'].format(data=data)
@@ -54,6 +55,7 @@ def check_snapshots(path: str, check_data=['cell', 'part']) -> np.ndarray:
         [iout_list, aexp_list, time_list, nstep_coarse_list, np.zeros(len(iout_list), dtype=bool)],
         dtype=[('iout', 'i4'), ('aexp', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4'), ('scheduled', '?')])
     table = np.sort(table, order='iout')
+    timer.record(f"Found {table.size} snapshots.")
     return table
 
 
@@ -187,13 +189,15 @@ def _chunk_slice_hdf_mp(
     region: Region | None=None,
     boundary_name="chunk_boundary",
     target_fields=None,
-    n_workers=config['DEFAULT_N_PROCS'],
+    n_workers=None,
     mp_backend="process",
     copy_result=True,
     is_cell=False,
     vname_set='native',
     use_vname_mapping=True,
 ):
+    if n_workers is None:
+        n_workers = config['DEFAULT_N_PROCS']
 
     chunk_indices = np.asarray(chunk_indices)
     if np.isscalar(chunk_sizes):
@@ -356,13 +360,16 @@ def read_hdf(
         levelmax=None, 
         levelmin=None,
         exact_cut=True,
-        n_workers=config['DEFAULT_N_PROCS'],
+        n_workers=None,
         use_process=True,
         copy_result=True,
         is_cell=False,
         vname_set=None,
         use_vname_mapping=True):
-    
+
+    if n_workers is None:
+        n_workers = config['DEFAULT_N_PROCS']
+
     if vname_set is None:
         vname_set = config['VNAME_SET']
 
@@ -586,8 +593,18 @@ read_sink = _generate_part_reader("sink")
 read_tracer = _generate_part_reader("tracer")
 
 
-def read_sinkprops(path: str, filename='SINKPROPS/sinkprops.h5', target_id: int | Sequence[int] | np.ndarray=None,
-                   icoarse_min: int | None=None, icoarse_max:int | None=None, target_fields=None, vname_set=None, use_vname_mapping=True):
+def read_sinkprops(
+        path: str,
+        filename='SINKPROPS/sinkprops.h5',
+        target_id: int | Sequence[int] | np.ndarray=None,
+        icoarse_min: int | None=None,
+        icoarse_max:int | None=None,
+        return_sinks=False,
+        return_steps=False,
+        target_fields=None,
+        vname_set=None,
+        use_vname_mapping=True):
+    
     filename = os.path.join(path, filename)
 
     if vname_set is None:
@@ -613,8 +630,13 @@ def read_sinkprops(path: str, filename='SINKPROPS/sinkprops.h5', target_id: int 
         dtype_out = np.dtype([(name, dtype_file.fields[name][0]) for name in target_fields_file]) if target_fields_file is not None else dtype_file
         dtype_out = remap_dtype_names(dtype_out, mapping) if use_vname_mapping else dtype_out
 
-        if target_id is not None:
+        if return_sinks or target_id is not None:
             sinks = get_by_type(f, 'sinks', h5py.Dataset)
+        
+        if return_steps or icoarse_max is not None or icoarse_min is not None:
+            steps = get_by_type(f, 'steps', h5py.Dataset)
+
+        if target_id is not None:
             if mapping_reverse is None:
                 mapping_reverse = get_mapping(vname_set, vname_set_file)
             id_field_name = mapping_reverse.get('identity', 'identity') if use_vname_mapping else 'identity'
@@ -625,9 +647,9 @@ def read_sinkprops(path: str, filename='SINKPROPS/sinkprops.h5', target_id: int 
                 target_id_set = np.array([target_id])
             else:
                 target_id_set = np.unique(target_id)
-            sinks_target = sinks[np.isin(id_data, target_id_set)]
-            offsets = sinks_target['offset']
-            sizes = sinks_target['num']
+            sinks = sinks[np.isin(id_data, target_id_set)]
+            offsets = sinks['offset']
+            sizes = sinks['num']
 
             size_total = np.sum(sizes)
             data_array = np.empty(size_total, dtype=dtype_out)
@@ -646,7 +668,6 @@ def read_sinkprops(path: str, filename='SINKPROPS/sinkprops.h5', target_id: int 
 
         else:
             if icoarse_max is not None or icoarse_min is not None:
-                steps = get_by_type(f, 'steps', h5py.Dataset)
                 mask = (steps['icoarse'] <= (icoarse_max if icoarse_max is not None else np.inf)) \
                         & (steps['icoarse'] >= (icoarse_min if icoarse_min is not None else 1))
                 steps_target = steps[mask]
@@ -663,7 +684,19 @@ def read_sinkprops(path: str, filename='SINKPROPS/sinkprops.h5', target_id: int 
             else:
                 data_array = data
         data_array = data_array[:]
-    return data_array.view(dtype_out)
+    
+        out = data_array.view(dtype_out)
+        if return_sinks:
+            dtype_sinks = remap_dtype_names(sinks.dtype, mapping) if use_vname_mapping else sinks.dtype
+            sinks = sinks[:].view(dtype_sinks)
+            out = (out, sinks)
+
+        if return_steps:
+            dtype_steps = remap_dtype_names(steps.dtype, mapping) if use_vname_mapping else steps.dtype
+            steps = steps[:].view(dtype_steps)
+            out = (out, steps) if not return_sinks else (out, sinks, steps)
+
+    return out
 
 
 def get_info(path: str, iout: int, cosmo=True, cosmo_table=None) -> dict:
