@@ -72,3 +72,16 @@ def uniform_digitize(values, lim, nbins):
     values_idx = values_idx.astype(int)
     values_idx = np.clip(values_idx, 0, nbins+1)
     return values_idx
+
+
+def format_bytes(bytes):
+    if bytes < 1024:
+        return f"{bytes:.2f} B"
+    elif bytes < 1024**2:
+        return f"{bytes / 1024:.2f} KiB"
+    elif bytes < 1024**3:
+        return f"{bytes / 1024**2:.2f} MiB"
+    elif bytes < 1024**4:
+        return f"{bytes / 1024**3:.2f} GiB"
+    else:
+        return f"{bytes / 1024**4:.2f} TiB"

@@ -9,7 +9,7 @@ from concurrent.futures import as_completed
 import configparser
 
 import re
-from . import get_config, get_dim_keys, get_position, get_velocity, get_vname, get_cell_size, cgs_unit
+from . import get_config, get_dim_keys, get_position, get_velocity, get_vname, get_cell_size, cgs_unit, timer, format_bytes
 from .astro import get_cosmo_table, cosmo_convert
 from .core import compute_chunk_list_from_hilbert, str_to_tuple, quad_to_f16
 from pyramis.geometry import Region, Box
@@ -25,6 +25,7 @@ from itertools import repeat
 config = get_config()
 
 def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missing=False, namelist_path=None, scale_threshold=50.) -> np.ndarray:
+    timer.start(f'Checking snapshots in {path} for {check_data}...')
     pattern = os.path.join(path, config['OUTPUT_FORMAT_ANY'])
     dirs = glob.glob(pattern)
     iout_list = []
@@ -40,7 +41,7 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missi
 
         if os.path.exists(info_path) is False:
             if report_missing:
-                print(f"Info file missing for iout={iout} in directory {d}.")
+                timer.message(f"Info file missing for iout={iout} in directory {d}.")
             continue
             
         info = parse_info(info_path)
@@ -50,7 +51,7 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missi
             files = glob.glob(file_pattern)
             if len(files) != info['ncpu']:
                 if report_missing:
-                    print(f"Number of '{data}' files does not match for iout={iout}. Expected {info['ncpu']} files, found {len(files)}.")
+                    timer.message(f"Number of '{data}' files does not match for iout={iout}. Expected {info['ncpu']} files, found {len(files)}.")
                 ok = False                    
         if ok:
             iout_list.append(iout)
@@ -100,7 +101,7 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missi
             scheduled[cand_key] = True
         else:
             if a < np.max(table['aexp']):
-                print(f"No snapshot found close enough to aexp={a:.5f} (closest is iout={cand['iout']}, aexp={cand['aexp']:.5f} with difference {np.abs(cand['aexp'] - a):.5f}, threshold is {a_thr[cand_key]:.5f})")
+                timer.message(f"No snapshot found close enough to aexp={a:.5f} (closest is iout={cand['iout']}, aexp={cand['aexp']:.5f} with difference {np.abs(cand['aexp'] - a):.5f}, threshold is {a_thr[cand_key]:.5f})")
     
     for i, t in enumerate(tout):
         diff = np.abs(table['time'] - t)
@@ -111,13 +112,15 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missi
             scheduled[cand_key] = True
         else:
             if t < np.max(table['time']):
-                print(f"No snapshot found close enough to time={t:.5f} (closest is iout={cand['iout']}, time={cand['time']:.5f} with difference {np.abs(cand['time'] - t):.5f}, threshold is {t_thr[cand_key]:.5f})")
+                timer.message(f"No snapshot found close enough to time={t:.5f} (closest is iout={cand['iout']}, time={cand['time']:.5f} with difference {np.abs(cand['time'] - t):.5f}, threshold is {t_thr[cand_key]:.5f})")
     table['scheduled'] = scheduled
+    timer.record(f'Checked snapshots in {path} for {check_data}. Found {len(table)} snapshots, with {np.sum(scheduled)} scheduled in namelist.')
 
     return table
 
 
 def read_type_descriptor(path: str, iout: int, data: str='part') -> np.dtype:
+    timer.message(f"Reading type descriptor for {data} at iout={iout} from {path}...", 2)
     fd_path = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILE_DESCRIPTOR_FORMAT'].format(data=data))
     if not os.path.exists(fd_path):
         raise FileNotFoundError(f"File descriptor not found: {fd_path}")
@@ -130,6 +133,7 @@ def read_type_descriptor(path: str, iout: int, data: str='part') -> np.dtype:
 
 
 def parse_info(path):
+    timer.message(f"Parsing info file: {path}...", 2)
     data = {}
     pattern = re.compile(r"""
         ^\s*
@@ -186,7 +190,9 @@ def parse_namelist(filename):
 
 
 def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None, read_amr=True, read_hydro=True) -> dict:
-    info = parse_info(os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), f'info_{iout:05d}.txt'))
+    info_path = os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), f'info_{iout:05d}.txt')
+    timer.message(f"Getting info for iout={iout} from {output_path}...", 2)
+    info = parse_info(info_path)
     info['iout'] = iout
 
     if read_amr:
@@ -195,6 +201,7 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
             raise FileNotFoundError(f"No AMR file found at iout = {iout} in {output_path}.")
 
         amr_path = amr_files[0]
+        timer.message(f"Reading AMR file: {amr_path}...", 2)
         with FortranFile(amr_path, mode='r') as f:
             info['ncpu'], = f.read_ints()
             info['ndim'], = f.read_ints()
@@ -257,6 +264,7 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
         hydro_files = glob.glob(os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES_ANY'].format(data='hydro', iout=iout)))
         if len(hydro_files) > 0:
             hydro_path = hydro_files[0]
+            timer.message(f"Reading hydro file: {hydro_path}...", 2)
             with FortranFile(hydro_path, mode='r') as f:
                 f.skip_records(1)
                 info['nhvar'], = f.read_ints()
@@ -346,6 +354,7 @@ def read_npart_header(path, iout):
 
 
 def read_npart_per_cpu(path, iout, cpulist=None, dtype_read=None, part_type=None, info=None, n_workers: int | None=None, mp_backend: str="thread") -> np.ndarray:
+    timer.message(f"Reading number of particles per CPU for iout={iout} from {path}...", 2)
     if cpulist is None:
         if info is None:
             info = get_info(path, iout)
@@ -457,6 +466,8 @@ def read_part(
         use_process: bool=False,
         copy_result: bool=True) -> np.ndarray | SharedView:
 
+    timer.start(f"Reading particle data from {path} at iout={iout}...")
+
     if isinstance(region, np.ndarray) or isinstance(region, list):
         region = Box(region)
 
@@ -523,6 +534,8 @@ def read_part(
 
     npart_per_cpu = read_npart_per_cpu(path, iout, cpulist, dtype_read=dtype_read, part_type=part_type)
     npart = np.sum(npart_per_cpu) if len(npart_per_cpu) > 0 else 0
+    size_byte = npart * dtype_out.itemsize
+    timer.message(f"Total number of particles to read: {npart} ({format_bytes(size_byte)}) across {len(cpulist)} / {int(info['ncpu'])} files.")
     if npart == 0:
         return np.empty(0, dtype=dtype_out)
     
@@ -553,6 +566,7 @@ def read_part(
         if isinstance(result, SharedView):
             result.close()
         result = result2
+    timer.record(f"Finished reading particle data from {path} at iout={iout}. Found {len(result)} particles.")
 
     return result
 
@@ -608,6 +622,7 @@ def _load_part_file(icpu, output_arr, path, iout, dtype_read, part_type=None):
 
 
 def read_ncell_per_cpu(path, iout, cpulist=None, info=None, read_branch=False) -> np.ndarray:
+    timer.message(f"Reading number of cells per CPU for iout={iout} from {path}...", 2)
     if info is None:
         info = get_info(path, iout)
     if cpulist is None:
@@ -711,7 +726,9 @@ def read_cell(
         n_workers: int=config['DEFAULT_N_PROCS'],
         use_process: bool=False,
         copy_result: bool=True) -> np.ndarray | SharedView:
-    
+
+    timer.start(f"Reading cell data from {path} at iout={iout}...")
+
     if isinstance(region, np.ndarray) or isinstance(region, list):
         region = Box(region)
 
@@ -772,6 +789,8 @@ def read_cell(
     
     ncell_per_cpu = read_ncell_per_cpu(path, iout, cpulist, info=info, read_branch=read_branch)
     ncell = np.sum(ncell_per_cpu) if len(ncell_per_cpu) > 0 else 0
+    size_byte = ncell * dtype_out.itemsize
+    timer.message(f"Total number of cells to read: {ncell} ({format_bytes(size_byte)}) across {len(cpulist)} / {int(info['ncpu'])} files.")
     if ncell == 0:
         return np.empty(0, dtype=dtype_out)
     
@@ -803,7 +822,8 @@ def read_cell(
         if isinstance(result, SharedView):
             result.close()
         result = result2
-    
+    timer.record(f"Finished reading cell data from {path} at iout={iout}. Found {len(result)} cells.")
+
     return result
 
 def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, read_grav=False, read_branch=False, info=None):
@@ -1117,6 +1137,8 @@ def read_sink(
         info: dict | None = None,
         exact_cut: bool=True) -> np.ndarray:
 
+    timer.record(f"Reading sink data from {path} at iout={iout}...")
+
     if isinstance(region, np.ndarray) or isinstance(region, list):
         region = Box(region)
 
@@ -1161,6 +1183,7 @@ def read_sink(
     if exact_cut and region is not None:
         result = result[region.contains_data(result, cell=False)]
 
+    timer.record(f"Finished reading sink data from {filename}. Found {len(result)} sink particles.")
     return result
 
 
@@ -1198,8 +1221,9 @@ def read_sinkprops(
         dtype: np.dtype | list | None = None,
         n_workers: int = config['DEFAULT_N_PROCS'],
         use_process: bool = True,
-        copy_result: bool = True,
-):
+        copy_result: bool = True):
+    
+    timer.record(f"Reading sink properties from {path}...")
     
     if use_process:
         mp_backend = "process"
@@ -1224,6 +1248,9 @@ def read_sinkprops(
 
     # output dtype
     dtype_out = np.dtype([(get_vname('icoarse'), np.int32), (get_vname('aexp'), np.float64), (get_vname('unit_l'), np.float64), (get_vname('unit_d'), np.float64), (get_vname('unit_t'), np.float64)] + dtype.descr)
+
+    size_byte = len(icoarse_read) * dtype_out.itemsize
+    timer.message(f"Found {len(icoarse_read)} sink property files to read ({format_bytes(size_byte)}).")
 
     if len(icoarse_read) == 0:
         return np.empty(0, dtype=dtype_out)
@@ -1295,6 +1322,7 @@ def read_sinkprops(
                 if exc is not None:
                     raise exc
         result = shared_arr
+    timer.record(f"Finished reading sink properties from {path}. Found {len(result)} items.")
     
     return result
 
