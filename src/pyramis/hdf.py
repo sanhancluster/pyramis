@@ -194,8 +194,8 @@ def _chunk_slice_hdf_mp(
     copy_result=True,
     is_cell=False,
     vname_set='native',
-    use_vname_mapping=True,
-):
+    use_vname_mapping=True):
+
     if n_workers is None:
         n_workers = config['DEFAULT_N_PROCS']
 
@@ -366,6 +366,8 @@ def read_hdf(
         is_cell=False,
         vname_set=None,
         use_vname_mapping=True):
+    
+    timer.record(f"Reading HDF5 data from {filename} in group {name}...")
 
     if n_workers is None:
         n_workers = config['DEFAULT_N_PROCS']
@@ -419,6 +421,8 @@ def read_hdf(
             chunk_sizes = levelmax - levelmin + 1
         else:
             chunk_sizes = 1
+    
+    timer.message(f"Total number of chunks to read: {len(chunk_indices)}.")
 
     if n_workers == 1:
         if not exact_cut:
@@ -428,6 +432,8 @@ def read_hdf(
         if not exact_cut:
             region = None
         result = _chunk_slice_hdf_mp(filename, name, chunk_indices, chunk_sizes=chunk_sizes, region=region, target_fields=target_fields, n_workers=n_workers, mp_backend=mp_backend, copy_result=copy_result, is_cell=is_cell, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
+
+    timer.record(f"Finished reading HDF5 data from {filename}. Found {len(result)} items.")
     return result
 
 
@@ -606,6 +612,7 @@ def read_sinkprops(
         use_vname_mapping=True):
     
     filename = os.path.join(path, filename)
+    timer.start(f"Reading sink properties from {filename}...")
 
     if vname_set is None:
         vname_set = config['VNAME_SET']
@@ -684,17 +691,18 @@ def read_sinkprops(
             else:
                 data_array = data
         data_array = data_array[:]
-    
-        out = data_array.view(dtype_out)
-        if return_sinks:
-            dtype_sinks = remap_dtype_names(sinks.dtype, mapping) if use_vname_mapping else sinks.dtype
-            sinks = sinks[:].view(dtype_sinks)
-            out = (out, sinks)
+    timer.record(f"Finished reading sink properties from {filename}. Found {len(data_array)} items.")
 
-        if return_steps:
-            dtype_steps = remap_dtype_names(steps.dtype, mapping) if use_vname_mapping else steps.dtype
-            steps = steps[:].view(dtype_steps)
-            out = (out, steps) if not return_sinks else (out, sinks, steps)
+    out = data_array.view(dtype_out)
+    if return_sinks:
+        dtype_sinks = remap_dtype_names(sinks.dtype, mapping) if use_vname_mapping else sinks.dtype
+        sinks = sinks[:].view(dtype_sinks)
+        out = (out, sinks)
+
+    if return_steps:
+        dtype_steps = remap_dtype_names(steps.dtype, mapping) if use_vname_mapping else steps.dtype
+        steps = steps[:].view(dtype_steps)
+        out = (out, steps) if not return_sinks else (out, sinks, steps)
 
     return out
 
@@ -719,6 +727,7 @@ def get_info(path: str, iout: int, cosmo=True, cosmo_table=None) -> dict:
     if len(filenames) == 0:
         raise FileNotFoundError(f"No HDF5 files found for iout={iout} in {path}")
     filename = filenames[0]
+    timer.message(f"Reading simulation info from {filename}...", 2)
     
     with h5py.File(filename, 'r') as f:
         attrs = dict(f.attrs)
