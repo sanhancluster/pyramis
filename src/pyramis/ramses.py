@@ -485,11 +485,7 @@ def read_part(
 
     if part_type is not None and target_fields is not None:
         target_fields = list(target_fields)
-        if 'family' not in target_fields and 'family' in dtype_read.names:
-            # Ensure 'family' is included for classification
-            warnings.warn("Including 'family' field for classification.", UserWarning)
-            target_fields = target_fields + ['family']
-        else:
+        if 'family' not in dtype_read.names:
             if 'tform' not in target_fields and 'tform' in dtype_read.names:
                 warnings.warn("Including 'tform' field for classification.", UserWarning)
                 target_fields = target_fields + ['tform']
@@ -499,7 +495,11 @@ def read_part(
             if 'id' not in target_fields and 'id' in dtype_read.names:
                 warnings.warn("Including 'id' field for classification.", UserWarning)
                 target_fields = target_fields + ['id']
-    
+        elif 'family' not in target_fields:
+            # Ensure 'family' is included for classification
+            warnings.warn("Including 'family' field for classification.", UserWarning)
+            target_fields = target_fields + ['family']
+
     dtype_out = dtype_read
 
     if read_cpu:
