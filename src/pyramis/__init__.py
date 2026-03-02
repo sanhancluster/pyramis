@@ -12,7 +12,9 @@ if config['DEFAULT_N_PROCS'] == 'auto':
 
 
 from .basic import *
-from . import geometry, halo_finder, image, hdf, ramses, utils, astro
+from . import utils
 
 timer = utils.Timestamp(verbose_level=config['VERBOSE_LEVEL'])
+
+from . import geometry, halo_finder, image, hdf, ramses, astro
 timer.message("Initialization complete for Pyramis.", verbose_lim=2)
