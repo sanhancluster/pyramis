@@ -8,9 +8,9 @@ import sys
 
 def in_jupyter():
     try:
-        from IPython.core.getipython import get_ipython
-        return get_ipython().__class__.__name__ == "ZMQInteractiveShell"
-    except:
+        import ipykernel
+        return True
+    except ImportError:
         return False
 
 
@@ -39,7 +39,7 @@ def get_mp_executor(backend: str="thread", n_workers: int=None):
 
 
 CYAN = "\033[36m"
-GREEN = "\033[33m"
+YELLOW = "\033[33m"
 RESET = "\033[0m"
 class Timestamp:
     """
@@ -53,7 +53,7 @@ class Timestamp:
         self.stat = {}
         self.verbose = verbose_level
         if use_color is None:
-            self.use_color = sys.stdout.isatty()
+            self.use_color = sys.stdout.isatty() or in_jupyter()
         else:
             self.use_color = use_color
         self.log_path = log_path
@@ -101,7 +101,7 @@ class Timestamp:
             if message is None:
                 message = "Done."
             if self.use_color:
-                print(f"{CYAN}[ {time_string} ]{RESET} {message} -> {GREEN}{recorded_time_string}{RESET}")
+                print(f"{CYAN}[ {time_string} ]{RESET} {message} -> {YELLOW}{recorded_time_string}{RESET}")
             else:
                 print(f"[ {time_string} ] {message} -> {recorded_time_string}")
             if self.log_path is not None:
