@@ -1,7 +1,7 @@
 import os
 import pickle as pkl
 
-from . import config, get_vname
+from . import config, get_vname, timer, format_bytes
 from .utils.fortranfile import FortranFile
 import numpy as np
 from typing import Sequence
@@ -65,7 +65,8 @@ def read_halomaker(
         iout:int | None=None,
         galaxy=False,
         double_precision: bool=True,
-        vname_set=None) -> np.ndarray:
+        vname_set=None,
+        error_on_missing=False) -> np.ndarray:
     """
     Read HaloMaker output data.
 
@@ -81,6 +82,8 @@ def read_halomaker(
         Whether to read data in double precision. Default is True.
     vname_set : str or None, optional
         Variable name set to use. If None, the default from config is used. Default is None.
+    error_on_missing : bool, optional
+        Whether to raise an error if the file is missing. Default is False.
     """
 
     if vname_set is None:
@@ -92,25 +95,33 @@ def read_halomaker(
         else:
             path = os.path.join(path, config['FILENAME_FORMAT_HALOMAKER'].format(iout=iout))
     
-    f = FortranFile(path, 'r')
-    nbodies = f.read_ints('i4')
-    massp = f.read_reals('f4')
-    if double_precision:
-        aexp = f.read_reals('f8')
+    timer.start(f"Reading halo data from {path} at iout={iout}...")
+
+    if not os.path.exists(path):
+        if error_on_missing:
+            raise FileNotFoundError(f"File {path} not found.")
+        else:
+            timer.record(f"File {path} not found. Skipping reading halo data at iout={iout}.")
+            nbin = 10
+            nhalo_snap = 0
     else:
-        aexp = f.read_reals('f4')
-    
-    omega_t = f.read_reals('f4')
-    age_univ = f.read_reals('f4')
-    nb_of_halos, nb_of_subhalos = f.read_ints('i4')
-    nhalo_snap = nb_of_halos + nb_of_subhalos
-    nbin = 0
-    if galaxy:
-        f.skip_records(15)
-        nbin, = f.read_ints('i4')
         f = FortranFile(path, 'r')
-        f.skip_records(6)
+        nbodies = f.read_ints('i4')
+        massp = f.read_reals('f4')
+        if double_precision:
+            aexp = f.read_reals('f8')
+        else:
+            aexp = f.read_reals('f4')
         
+        omega_t = f.read_reals('f4')
+        age_univ = f.read_reals('f4')
+        nb_of_halos, nb_of_subhalos = f.read_ints('i4')
+        nhalo_snap = nb_of_halos + nb_of_subhalos
+        nbin = 0
+        if galaxy:
+            f.skip_records(15)
+            nbin, = f.read_ints('i4')
+
     struct = _get_halomaker_struct(galaxy=galaxy, double_precision=double_precision, nbin=nbin)
     dtypes = []
     for item in struct:
@@ -126,9 +137,18 @@ def read_halomaker(
                     dtypes.append((name, dtype))
     data = np.zeros(nhalo_snap, dtype=dtypes)
 
-    for i in range(nhalo_snap):
-        _read_halo(f, data[i], struct, vname_set=vname_set)
-    f.close()
+    if nhalo_snap == 0:
+        return data
+    else:
+        f = FortranFile(path, 'r')
+        f.skip_records(6)
+        for i in range(nhalo_snap):
+            _read_halo(f, data[i], struct, vname_set=vname_set)
+        f.close()
+
+    size_byte = data.nbytes
+    timer.record(f"Finished reading {nhalo_snap} halo data ({format_bytes(size_byte)}) from {path}.")
+
     return data
 
 
@@ -150,6 +170,8 @@ def read_halomaker_members(
             path = os.path.join(path, config['FILENAME_FORMAT_GALAXYMAKER'].format(iout=iout))
         else:
             path = os.path.join(path, config['FILENAME_FORMAT_HALOMAKER'].format(iout=iout))
+
+    timer.start(f"Reading halo member data from {path}...")
 
     # Get the number of particles for each halo
     with FortranFile(path, 'r') as f:
@@ -190,6 +212,8 @@ def read_halomaker_members(
                 f.skip_records(nskip - 2)
             else:
                 f.skip_records(nskip)
+    num_target = len(target_id) if target_id is not None else nhalo_snap
+    timer.record(f"Found {nparts_out} members for {num_target} halos in total.")
 
     return members if not return_nparts else (members, nparts_arr)
 
