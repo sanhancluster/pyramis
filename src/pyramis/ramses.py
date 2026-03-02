@@ -1137,7 +1137,7 @@ def read_sink(
         info: dict | None = None,
         exact_cut: bool=True) -> np.ndarray:
 
-    timer.record(f"Reading sink data from {path} at iout={iout}...")
+    timer.start(f"Reading sink data from {path} at iout={iout}...")
 
     if isinstance(region, np.ndarray) or isinstance(region, list):
         region = Box(region)

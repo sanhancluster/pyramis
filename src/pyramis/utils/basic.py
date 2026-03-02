@@ -101,7 +101,7 @@ class Timestamp:
             if message is None:
                 message = "Done."
             if self.use_color:
-                print(f"{CYAN}[ {time_string} ]{RESET} {message} -> {YELLOW}{recorded_time_string}{RESET}")
+                print(f"{CYAN}[ {time_string} ]{RESET} {message} {YELLOW}-> {recorded_time_string}{RESET}")
             else:
                 print(f"[ {time_string} ] {message} -> {recorded_time_string}")
             if self.log_path is not None:
