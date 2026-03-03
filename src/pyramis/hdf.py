@@ -367,7 +367,7 @@ def read_hdf(
         vname_set=None,
         use_vname_mapping=True):
     
-    timer.record(f"Reading HDF5 data from {filename} in group {name}...")
+    timer.start(f"Reading HDF5 data from {filename} in group {name}...")
 
     if n_workers is None:
         n_workers = config['DEFAULT_N_PROCS']
@@ -691,18 +691,18 @@ def read_sinkprops(
             else:
                 data_array = data
         data_array = data_array[:]
+
+        out = data_array.view(dtype_out)
+        if return_sinks:
+            dtype_sinks = remap_dtype_names(sinks.dtype, mapping) if use_vname_mapping else sinks.dtype
+            sinks = sinks[:].view(dtype_sinks)
+            out = (out, sinks)
+
+        if return_steps:
+            dtype_steps = remap_dtype_names(steps.dtype, mapping) if use_vname_mapping else steps.dtype
+            steps = steps[:].view(dtype_steps)
+            out = (out, steps) if not return_sinks else (out, sinks, steps)
     timer.record(f"Finished reading sink properties from {filename}. Found {len(data_array)} items.")
-
-    out = data_array.view(dtype_out)
-    if return_sinks:
-        dtype_sinks = remap_dtype_names(sinks.dtype, mapping) if use_vname_mapping else sinks.dtype
-        sinks = sinks[:].view(dtype_sinks)
-        out = (out, sinks)
-
-    if return_steps:
-        dtype_steps = remap_dtype_names(steps.dtype, mapping) if use_vname_mapping else steps.dtype
-        steps = steps[:].view(dtype_steps)
-        out = (out, steps) if not return_sinks else (out, sinks, steps)
 
     return out
 
