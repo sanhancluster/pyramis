@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyramis"
-version = "0.1.12"
-description = "A python-based ramses analyzer for minimalist"
+version = "0.1.13"
+description = "Python Reader for Adaptive Mesh Interface Simulations"
 authors = [
   {name="San Han", email="san.han@iap.fr"}
 ]
@@ -31,4 +31,4 @@ pyramis = ["*.toml"]
 where = ["src"]
 
 [project.urls]
-Repository = "https://github.com/sanhan/pyramis"
+Repository = "https://github.com/sanhancluster/pyramis"

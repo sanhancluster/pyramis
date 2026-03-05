@@ -6,7 +6,6 @@ from typing import Any
 
 
 BASE_CONFIG = "config_base.toml"
-CONFIG = "config.toml"
 _config = {}
 
 def _deep_update(dst: dict[str, Any], src: dict[str, Any]) -> dict[str, Any]:
@@ -27,14 +26,17 @@ def _load_external_toml(path: str) -> dict[str, Any]:
     with open(path, "rb") as f:
         return tomllib.load(f)
 
-def load_config(path=CONFIG) -> dict[str, Any]:
+def load_config(path=None) -> dict[str, Any]:
     global _config
     _deep_update(_config, _load_packaged_toml(BASE_CONFIG))
-    try:
-        override = _load_external_toml(path)
-    except FileNotFoundError:
-        return _config
-    _deep_update(_config, override)
+    if path is not None:
+        try:
+            override = _load_external_toml(path)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Config file '{path}' not found.")
+        except tomllib.TOMLDecodeError as e:
+            raise ValueError(f"Error parsing config file '{path}': {e}")
+        _deep_update(_config, override)
 
 def get_config():
     global _config

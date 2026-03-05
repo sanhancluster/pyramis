@@ -7,7 +7,7 @@ from typing import Sequence
 from concurrent.futures import as_completed
 import warnings
 
-from . import config, get_dim_keys, get_vname, get_mapping, cgs_unit
+from . import config, get_dim_keys, get_vname, get_mapping, cgs_unit, timer
 from .core import compute_chunk_list_from_hilbert
 from .geometry import Region, Box
 from .utils.arrayview import SharedView
@@ -19,6 +19,7 @@ from multiprocessing.shared_memory import SharedMemory
 
 
 def check_snapshots(path: str, check_data=['cell', 'part']) -> np.ndarray:
+    timer.start(f"Checking HDF snapshots at {path} for {check_data}...")
     iout_list = None
     for data in check_data:
         pattern = config['FILENAME_FORMAT_HDF_ANY'].format(data=data)
@@ -54,6 +55,7 @@ def check_snapshots(path: str, check_data=['cell', 'part']) -> np.ndarray:
         [iout_list, aexp_list, time_list, nstep_coarse_list, np.zeros(len(iout_list), dtype=bool)],
         dtype=[('iout', 'i4'), ('aexp', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4'), ('scheduled', '?')])
     table = np.sort(table, order='iout')
+    timer.record(f"Found {table.size} snapshots.")
     return table
 
 
@@ -187,13 +189,15 @@ def _chunk_slice_hdf_mp(
     region: Region | None=None,
     boundary_name="chunk_boundary",
     target_fields=None,
-    n_workers=config['DEFAULT_N_PROCS'],
+    n_workers=None,
     mp_backend="process",
     copy_result=True,
     is_cell=False,
     vname_set='native',
-    use_vname_mapping=True,
-):
+    use_vname_mapping=True):
+
+    if n_workers is None:
+        n_workers = config['DEFAULT_N_PROCS']
 
     chunk_indices = np.asarray(chunk_indices)
     if np.isscalar(chunk_sizes):
@@ -356,13 +360,18 @@ def read_hdf(
         levelmax=None, 
         levelmin=None,
         exact_cut=True,
-        n_workers=config['DEFAULT_N_PROCS'],
+        n_workers=None,
         use_process=True,
         copy_result=True,
         is_cell=False,
         vname_set=None,
         use_vname_mapping=True):
     
+    timer.start(f"Reading HDF5 data from {filename} in group {name}...")
+
+    if n_workers is None:
+        n_workers = config['DEFAULT_N_PROCS']
+
     if vname_set is None:
         vname_set = config['VNAME_SET']
 
@@ -412,6 +421,8 @@ def read_hdf(
             chunk_sizes = levelmax - levelmin + 1
         else:
             chunk_sizes = 1
+    
+    timer.message(f"Total number of chunks to read: {len(chunk_indices)}.")
 
     if n_workers == 1:
         if not exact_cut:
@@ -421,6 +432,8 @@ def read_hdf(
         if not exact_cut:
             region = None
         result = _chunk_slice_hdf_mp(filename, name, chunk_indices, chunk_sizes=chunk_sizes, region=region, target_fields=target_fields, n_workers=n_workers, mp_backend=mp_backend, copy_result=copy_result, is_cell=is_cell, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
+
+    timer.record(f"Finished reading HDF5 data from {filename}. Found {len(result)} items.")
     return result
 
 
@@ -600,6 +613,7 @@ def read_sinkprops(
         use_vname_mapping=True):
     
     filename = os.path.join(path, filename)
+    timer.start(f"Reading sink properties from {filename}...")
 
     if vname_set is None:
         vname_set = config['VNAME_SET']
@@ -723,6 +737,7 @@ def get_info(path: str, iout: int, cosmo=True, cosmo_table=None) -> dict:
     if len(filenames) == 0:
         raise FileNotFoundError(f"No HDF5 files found for iout={iout} in {path}")
     filename = filenames[0]
+    timer.message(f"Reading simulation info from {filename}...", 2)
     
     with h5py.File(filename, 'r') as f:
         attrs = dict(f.attrs)
