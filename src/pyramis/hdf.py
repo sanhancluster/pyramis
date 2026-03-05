@@ -586,84 +586,121 @@ read_sink = _generate_part_reader("sink")
 read_tracer = _generate_part_reader("tracer")
 
 
-def read_sinkprops(path: str, filename='SINKPROPS/sinkprops.h5', target_id: int | Sequence[int] | np.ndarray=None,
-                   icoarse_min: int | None=None, icoarse_max:int | None=None, target_fields=None, vname_set=None, use_vname_mapping=True):
+def read_sinkprops(
+        path: str,
+        filename='SINKPROPS/sinkprops.h5',
+        target_id: int | Sequence[int] | np.ndarray=None,
+        icoarse_min: int | None=None,
+        icoarse_max:int | None=None,
+        return_data=True,
+        return_sinks=False,
+        return_steps=False,
+        target_fields=None,
+        vname_set=None,
+        use_vname_mapping=True):
+    
     filename = os.path.join(path, filename)
 
     if vname_set is None:
         vname_set = config['VNAME_SET']
 
     with h5py.File(filename, 'r') as f:
-        data = get_by_type(f, 'data', h5py.Dataset)
-        dtype_file = data.dtype
+        if return_data:
+            data = get_by_type(f, 'data', h5py.Dataset)
+            dtype_file = data.dtype
 
-        if icoarse_max is not None and icoarse_max < 0:
-            icoarse_max = f.attrs.get('icoarse_max', 0) + icoarse_max + 1
-        if icoarse_min is not None and icoarse_min < 0:
-            icoarse_min = f.attrs.get('icoarse_max', 0) + icoarse_min + 1
+            if icoarse_max is not None and icoarse_max < 0:
+                icoarse_max = f.attrs.get('icoarse_max', 0) + icoarse_max + 1
+            if icoarse_min is not None and icoarse_min < 0:
+                icoarse_min = f.attrs.get('icoarse_max', 0) + icoarse_min + 1
 
-        vname_set_file = f.attrs.get('vname_set', 'native')
-        mapping = get_mapping(vname_set_file, vname_set)
-        mapping_reverse = None
-        if target_fields is not None:
-            mapping_reverse = get_mapping(vname_set, vname_set_file)
-            target_fields_file = [mapping_reverse.get(f, f) for f in target_fields if mapping_reverse.get(f, f) in dtype_file.names]
-        else:
-            target_fields_file = None
-        dtype_out = np.dtype([(name, dtype_file.fields[name][0]) for name in target_fields_file]) if target_fields_file is not None else dtype_file
-        dtype_out = remap_dtype_names(dtype_out, mapping) if use_vname_mapping else dtype_out
-
-        if target_id is not None:
-            sinks = get_by_type(f, 'sinks', h5py.Dataset)
-            if mapping_reverse is None:
+            vname_set_file = f.attrs.get('vname_set', 'native')
+            mapping = get_mapping(vname_set_file, vname_set)
+            mapping_reverse = None
+            if target_fields is not None:
                 mapping_reverse = get_mapping(vname_set, vname_set_file)
-            id_field_name = mapping_reverse.get('identity', 'identity') if use_vname_mapping else 'identity'
-            if id_field_name not in sinks.dtype.names:
-                raise ValueError(f"ID field '{id_field_name}' not found in sinkprops dataset.")
-            id_data = sinks[id_field_name]
-            if np.isscalar(target_id):
-                target_id_set = np.array([target_id])
+                target_fields_file = [mapping_reverse.get(f, f) for f in target_fields if mapping_reverse.get(f, f) in dtype_file.names]
             else:
-                target_id_set = np.unique(target_id)
-            sinks_target = sinks[np.isin(id_data, target_id_set)]
-            offsets = sinks_target['offset']
-            sizes = sinks_target['num']
+                target_fields_file = None
+            dtype_out = np.dtype([(name, dtype_file.fields[name][0]) for name in target_fields_file]) if target_fields_file is not None else dtype_file
+            dtype_out = remap_dtype_names(dtype_out, mapping) if use_vname_mapping else dtype_out
 
-            size_total = np.sum(sizes)
-            data_array = np.empty(size_total, dtype=dtype_out)
-            start = 0
-            for offset, size in zip(offsets, sizes):
-                data_slice = data[offset:offset+size]
-                if target_fields_file is not None:
-                    data_slice = data_slice.fields(target_fields_file)
-                else:
-                    data_slice = data_slice
-                data_array[start:start+size] = data_slice
-                start += size
-            if icoarse_max is not None or icoarse_min is not None:
-                mask = (data_array['icoarse'] <= (icoarse_max if icoarse_max is not None else np.inf)) & (data_array['icoarse'] >= (icoarse_min if icoarse_min is not None else 1))
-                data_array = data_array[mask]
-
-        else:
-            if icoarse_max is not None or icoarse_min is not None:
+            if return_sinks or target_id is not None:
+                sinks = get_by_type(f, 'sinks', h5py.Dataset)
+            
+            if return_steps or icoarse_max is not None or icoarse_min is not None:
                 steps = get_by_type(f, 'steps', h5py.Dataset)
-                mask = (steps['icoarse'] <= (icoarse_max if icoarse_max is not None else np.inf)) \
-                        & (steps['icoarse'] >= (icoarse_min if icoarse_min is not None else 1))
-                steps_target = steps[mask]
-                offsets = steps_target['offset']
-                sizes = steps_target['num']
-                icoarse_key = get_by_type(f, 'icoarse_key', h5py.Dataset)
-                key_array = np.empty(np.sum(sizes), dtype=icoarse_key.dtype)
+
+            if target_id is not None:
+                if mapping_reverse is None:
+                    mapping_reverse = get_mapping(vname_set, vname_set_file)
+                id_field_name = mapping_reverse.get('identity', 'identity') if use_vname_mapping else 'identity'
+                if id_field_name not in sinks.dtype.names:
+                    raise ValueError(f"ID field '{id_field_name}' not found in sinkprops dataset.")
+                id_data = sinks[id_field_name]
+                if np.isscalar(target_id):
+                    target_id_set = np.array([target_id])
+                else:
+                    target_id_set = np.unique(target_id)
+                sinks = sinks[np.isin(id_data, target_id_set)]
+                offsets = sinks['offset']
+                sizes = sinks['num']
+
+                size_total = np.sum(sizes)
+                data_array = np.empty(size_total, dtype=dtype_out)
                 start = 0
                 for offset, size in zip(offsets, sizes):
-                    key_array[start:start+size] = icoarse_key[offset:offset+size]
+                    data_slice = data[offset:offset+size]
+                    if target_fields_file is not None:
+                        data_slice = data_slice.fields(target_fields_file)
+                    else:
+                        data_slice = data_slice
+                    data_array[start:start+size] = data_slice
                     start += size
-                key_array = np.sort(key_array)
-                data_array = data[key_array]
+                if icoarse_max is not None or icoarse_min is not None:
+                    mask = (data_array['icoarse'] <= (icoarse_max if icoarse_max is not None else np.inf)) & (data_array['icoarse'] >= (icoarse_min if icoarse_min is not None else 1))
+                    data_array = data_array[mask]
+
             else:
-                data_array = data
-        data_array = data_array[:]
-    return data_array.view(dtype_out)
+                if icoarse_max is not None or icoarse_min is not None:
+                    mask = (steps['icoarse'] <= (icoarse_max if icoarse_max is not None else np.inf)) \
+                            & (steps['icoarse'] >= (icoarse_min if icoarse_min is not None else 1))
+                    steps_target = steps[mask]
+                    offsets = steps_target['offset']
+                    sizes = steps_target['num']
+                    icoarse_key = get_by_type(f, 'icoarse_key', h5py.Dataset)
+                    key_array = np.empty(np.sum(sizes), dtype=icoarse_key.dtype)
+                    start = 0
+                    for offset, size in zip(offsets, sizes):
+                        key_array[start:start+size] = icoarse_key[offset:offset+size]
+                        start += size
+                    key_array = np.sort(key_array)
+                    data_array = data[key_array]
+                else:
+                    data_array = data
+            data_array = data_array[:]
+
+            out = data_array.view(dtype_out)
+        else:
+            out = None
+        if return_sinks:
+            dtype_sinks = remap_dtype_names(sinks.dtype, mapping) if use_vname_mapping else sinks.dtype
+            sinks = sinks[:].view(dtype_sinks)
+            if out is not None:
+                out = (out, sinks)
+            else:
+                out = sinks
+
+        if return_steps:
+            dtype_steps = remap_dtype_names(steps.dtype, mapping) if use_vname_mapping else steps.dtype
+            steps = steps[:].view(dtype_steps)
+            if out is not None:
+                out = (out, steps) if not return_sinks else (out, sinks, steps)
+            else:
+                out = steps
+    timer.record(f"Finished reading sink properties from {filename}. Found {len(data_array)} items.")
+
+    return out
 
 
 def get_info(path: str, iout: int, cosmo=True, cosmo_table=None) -> dict:
