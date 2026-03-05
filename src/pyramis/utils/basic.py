@@ -5,12 +5,12 @@ import multiprocessing as mp
 import time
 import sys
 
-
-def in_jupyter():
+def in_jupyter() -> bool:
     try:
-        import ipykernel
-        return True
-    except ImportError:
+        from IPython import get_ipython  # type: ignore
+        shell = get_ipython()
+        return shell is not None and shell.__class__.__name__ == "ZMQInteractiveShell"
+    except Exception:
         return False
 
 
