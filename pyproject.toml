@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyramis"
-version = "0.1.13"
+version = "0.1.15"
 description = "Python Reader for Adaptive Mesh Interface Simulations"
 authors = [
   {name="San Han", email="san.han@iap.fr"}
@@ -12,10 +12,11 @@ authors = [
 requires-python = ">=3.11"
 license = {file = "LICENSE"}
 dependencies = [
-    "h5py>=3.12.1",
+    "h5py>=3.11.0",
     "numpy>=1.26.4",
-    "scipy>=1.16.3",
+    "scipy>=1.13.1",
     "scikit-image>=0.21.0",
+    "platformdirs>=2.0.0"
 ]
 readme = "README.md"
 keywords = ["ramses"]
