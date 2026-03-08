@@ -72,7 +72,7 @@ def export_hdf(repo: str, output_path='SINKPROPS/sinkprops.h5', h5py_kwargs=None
 
     timer.record("Finished writing sink properties to HDF5")
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser(description="Export sink properties to HDF5.")
     parser.add_argument("repo", type=str, help="Path to the repository.")
     parser.add_argument("--output", type=str, default="SINKPROPS/sinkprops.h5", help="Output HDF5 file path.")
@@ -88,3 +88,6 @@ if __name__ == '__main__':
     timer.record("Finished exporting sink properties to HDF5", name='main')
 
     print("Export completed.")
+
+if __name__ == '__main__':
+    main()

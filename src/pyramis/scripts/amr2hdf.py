@@ -637,47 +637,13 @@ def set_level_boundaries(levels: np.ndarray, chunk_boundary: np.ndarray, n_chunk
 
 
 
-def main(args):
+def main():
     """
     Main function to extract data from the snapshot and save it to HDF5.
     """
-    dataset_kw = args.dataset_kw if hasattr(args, 'dataset_kw') else {}
-
-    iout_list = np.arange(args.imin, args.imax + 1)
-    repo_path = args.repo
-    overwrite = args.overwrite
-    version = args.version
-
-    # receive the snapshot from the simulation repository
-    #snap = uri.RamsesSnapshot(repo_path, iout=iout_list[0], mode='nc')
-    #repo = uri.RamsesRepo(snap)
-    
-    sim_publication = args.sim_publication if hasattr(args, 'sim_publication') else ""
-    sim_description = args.sim_description if hasattr(args, 'sim_description') else ""
-
-    converted_dtypes_part = args.converted_dtypes_part if hasattr(args, 'converted_dtypes_part') else None
-    converted_dtypes_cell = args.converted_dtypes_cell if hasattr(args, 'converted_dtypes_cell') else None
-
-    n_chunk = args.nchunk if hasattr(args, 'nchunk') else 1000
-
-    size_load = args.nload
-    nthread = args.nthread
-    relative_output_path = args.output
-
-    #iout_list = np.arange(0, snap.iout, 10)[::-1]
-    #iout_list = [repo.get_snap(z=z).iout for z in [1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0]][::-1]
-    cpu_list = None
-    export_snapshots(repo_path, iout_list=iout_list, n_chunk=n_chunk, size_load=size_load,
-                     converted_dtypes_part=converted_dtypes_part, converted_dtypes_cell=converted_dtypes_cell,
-                     output_path=relative_output_path, cpu_list=cpu_list, dataset_kw=dataset_kw,
-                     sim_description=sim_description, sim_publication=sim_publication,
-                     version=version, overwrite=overwrite, nthread=nthread, walltime=args.walltime, update_attributes=args.update_attributes)
-
-
-if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Convert Ramses snapshot data to HDF5 format.')
     print(f"Usage: {parser.prog} [options] <repo_path>")
-    print("Check config (*.toml) file to set options if needed. (Usage example: python ramses_to_hdf5.py -c config.toml)")
+    print("Check config (*.toml) file to set options if needed. (Usage example: amr2hdf -c config.toml)")
     parser.add_argument("--repo", "-r", help='Repository path', type=str, default='.')
     parser.add_argument("--imin", "-i", help='Minimum output index to process (default: 1)', type=int, default=1)
     parser.add_argument("--imax", "-I", help='Maximum output index to process (default: 1)', type=int, default=1)
@@ -713,10 +679,47 @@ if __name__ == '__main__':
     print('-----------------------------------------------')
 
     timer.start("Starting data export...", name='main')
-    main(args)
+
+    dataset_kw = args.dataset_kw if hasattr(args, 'dataset_kw') else {}
+
+    iout_list = np.arange(args.imin, args.imax + 1)
+    repo_path = args.repo
+    overwrite = args.overwrite
+    version = args.version
+
+    # receive the snapshot from the simulation repository
+    #snap = uri.RamsesSnapshot(repo_path, iout=iout_list[0], mode='nc')
+    #repo = uri.RamsesRepo(snap)
+    
+    sim_publication = args.sim_publication if hasattr(args, 'sim_publication') else ""
+    sim_description = args.sim_description if hasattr(args, 'sim_description') else ""
+
+    converted_dtypes_part = args.converted_dtypes_part if hasattr(args, 'converted_dtypes_part') else None
+    converted_dtypes_cell = args.converted_dtypes_cell if hasattr(args, 'converted_dtypes_cell') else None
+
+    n_chunk = args.nchunk if hasattr(args, 'nchunk') else 1000
+
+    size_load = args.nload
+    nthread = args.nthread
+    relative_output_path = args.output
+
+    #iout_list = np.arange(0, snap.iout, 10)[::-1]
+    #iout_list = [repo.get_snap(z=z).iout for z in [1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0]][::-1]
+    cpu_list = None
+    export_snapshots(repo_path, iout_list=iout_list, n_chunk=n_chunk, size_load=size_load,
+                     converted_dtypes_part=converted_dtypes_part, converted_dtypes_cell=converted_dtypes_cell,
+                     output_path=relative_output_path, cpu_list=cpu_list, dataset_kw=dataset_kw,
+                     sim_description=sim_description, sim_publication=sim_publication,
+                     version=version, overwrite=overwrite, nthread=nthread, walltime=args.walltime, update_attributes=args.update_attributes)
+
+
     timer.record("Script completed successfully.", name='main')
 
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print('-----------------------------------------------')
     print(f"RAMSES to HDF5: Script completed at {now}")
     print('-----------------------------------------------')
+
+
+if __name__ == '__main__':
+    main()

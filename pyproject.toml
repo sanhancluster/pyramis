@@ -16,10 +16,15 @@ dependencies = [
     "numpy>=1.26.4",
     "scipy>=1.13.1",
     "scikit-image>=0.21.0",
-    "platformdirs>=2.0.0"
+    "platformdirs>=2.0.0",
+    "tqdm>=4.65.0"
 ]
 readme = "README.md"
 keywords = ["ramses"]
+
+[project.scripts]
+amr2hdf = "pyramis.scripts.amr2hdf:main"
+sinkprops2hdf = "pyramis.scripts.sinkprops2hdf:main"
 
 [tool.setuptools]
 include-package-data = true
