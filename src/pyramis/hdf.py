@@ -45,14 +45,20 @@ def check_snapshots(path: str, check_data=['cell', 'part']) -> np.ndarray:
         iout_list = np.array([])
     
     aexp_list, time_list, nstep_coarse_list = [], [], []
+    iout_list_new = []
     for iout in iout_list:
-        info = get_info(path, iout, cosmo=False)
+        try:
+            info = get_info(path, iout, cosmo=False, check_data=check_data)
+        except BlockingIOError:
+            timer.message(f"Skipping file for iout={iout}, which is currently locked.")
+            continue
+        iout_list_new.append(iout)
         aexp_list.append(info.get('aexp', 1.0))
         time_list.append(info.get('age', 0.0))
         nstep_coarse_list.append(info.get('icoarse', 0))
 
     table = np.rec.fromarrays(
-        [iout_list, aexp_list, time_list, nstep_coarse_list, np.zeros(len(iout_list), dtype=bool)],
+        [iout_list_new, aexp_list, time_list, nstep_coarse_list, np.zeros(len(iout_list_new), dtype=bool)],
         dtype=[('iout', 'i4'), ('aexp', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4'), ('scheduled', '?')])
     table = np.sort(table, order='iout')
     timer.record(f"Found {table.size} snapshots.")
@@ -717,7 +723,7 @@ def read_sinkprops(
     return out
 
 
-def get_info(path: str, iout: int, cosmo=True, cosmo_table=None) -> dict:
+def get_info(path: str, iout: int, cosmo=True, cosmo_table=None, check_data=['cell', 'part']) -> dict:
     """
     Get simulation info from HDF5 file attributes.
 
@@ -732,7 +738,7 @@ def get_info(path: str, iout: int, cosmo=True, cosmo_table=None) -> dict:
     cosmo_table : dict, optional
         Precomputed cosmology table. If None, it will be created from file attributes.
     """
-    filenames = [os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data=data, iout=iout)) for data in ['cell', 'part']]
+    filenames = [os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data=data, iout=iout)) for data in check_data]
     filenames = [fn for fn in filenames if os.path.exists(fn)]
     if len(filenames) == 0:
         raise FileNotFoundError(f"No HDF5 files found for iout={iout} in {path}")

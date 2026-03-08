@@ -23,7 +23,7 @@ def get_mp_context():
         return mp.get_context("spawn")
 
 
-def get_mp_executor(backend: str="thread", n_workers: int=None):
+def get_mp_executor(backend: str="thread", n_workers: int | None=None):
     if n_workers is None:
         n_workers = config['DEFAULT_N_PROCS']
 
