@@ -39,14 +39,16 @@ print(f"Mean gas density within the box is {np.mean(cell['rho'])}") # in code un
 ```
 
 ### Reading RAMSES HDF format data
+pyramis uses concurrent.futures.ProcessPoolExecutor by default to enable parallel read from HDF files. This requires main block guard for the top-level script.
 #### The particle and cell data
-HDF format requires particle type to be specified.
 ```python
-hdf_path = '/path/to/hdf/' # path to the directory where part_*.h5, cell_*.h5 are located
-region = [[0.4, 0.6], [0.4, 0.6], [0.4, 0.6]] # targeting box in code unit
-part = pr.hdf.read_part(hdf_path, part_type='star', iout=1, region=region)
-cell = pr.hdf.read_cell(hdf_path, iout=1, region=region)
+if __name__ == '__main__':
+    hdf_path = '/path/to/hdf/' # path to the directory where part_*.h5, cell_*.h5 are located
+    region = [[0.4, 0.6], [0.4, 0.6], [0.4, 0.6]] # targeting box in code unit
+    part = pr.hdf.read_part(hdf_path, part_type='star', iout=1, region=region)
+    cell = pr.hdf.read_cell(hdf_path, iout=1, region=region)
 ```
+When reading HDF particle data, particle type need to be always specified.
 
 ### Reading HaloMaker data
 #### DM Halo and Galaxy Catalog
