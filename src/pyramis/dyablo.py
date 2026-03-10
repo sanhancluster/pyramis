@@ -47,8 +47,15 @@ def read_cell(path, istep=None, prefix=None):
         filename = path
     else:
         if prefix is None:
-            prefix = ANY
-        filename = os.path.join(path, config['FILENAME_FORMAT_DYABLO'].format(prefix=prefix, istep=istep))
+            pattern = os.path.join(path, config['FILENAME_FORMAT_DYABLO'].format(prefix=ANY, istep=istep))
+            files = glob.glob(pattern)
+            if len(files) == 0:
+                raise FileNotFoundError(f"No files found matching pattern {pattern}.")
+            elif len(files) > 1:
+                raise FileExistsError(f"Multiple files found matching pattern {pattern}. Please specify a prefix.")
+            filename = files[0]
+        else:
+            filename = os.path.join(path, config['FILENAME_FORMAT_DYABLO'].format(prefix=prefix, istep=istep))
 
     with h5py.File(filename, 'r') as f:
         connectivity = f['connectivity'][:]
