@@ -72,3 +72,16 @@ def uniform_digitize(values, lim, nbins):
     values_idx = values_idx.astype(int)
     values_idx = np.clip(values_idx, 0, nbins+1)
     return values_idx
+
+
+class Wildcard:
+    def __format__(self, format_spec):
+        return '*'
+    
+    def __str__(self):
+        return '*'
+    
+    def __eq__(self, other):
+        return True
+
+ANY = Wildcard()

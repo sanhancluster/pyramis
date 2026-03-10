@@ -1,11 +1,53 @@
+from fileinput import filename
+import warnings
+
 from . import config
 from .hdf import get_by_type
 import h5py
 import os
 import numpy as np
+import glob
+from . import ANY
 
-def read_cell(path, istep, prefix=None):
-    filename = os.path.join(path, config['FILENAME_FORMAT_DYABLO'].format(prefix=prefix, istep=istep))
+def check_snapshots(path, prefix=None):
+    if prefix is None:
+        prefix = ANY
+    pattern = os.path.join(path, config['FILENAME_FORMAT_DYABLO'].format(prefix=prefix, istep=ANY))
+    files = glob.glob(pattern)
+    scalar_data_dtypes = {}
+    
+    for file in files:
+        with h5py.File(file, 'r') as f:
+            scalar_data = f['scalar_data'].attrs
+            scalar_data_dtypes.update({name: scalar_data[name].dtype for name in scalar_data.keys()})
+ 
+    dtype = [('istep', 'i4')]
+    for name, dtype_value in scalar_data_dtypes.items():
+        dtype.append((name, dtype_value))
+    snapshots = np.zeros(len(files), dtype=dtype)
+
+    for i, file in enumerate(files):
+        filename = os.path.basename(file)
+        try:
+            istep_str = filename.split('_iter')[1].split('.h5')[0]
+            istep = int(istep_str)
+        except (IndexError, ValueError):
+            warnings.warn(f"Could not extract istep from filename {filename}. Skipping.")
+            continue
+
+        with h5py.File(file, 'r') as f:
+            scalar_data = f['scalar_data'].attrs
+            snapshots['istep'][i] = istep
+            for name in scalar_data.keys():
+                snapshots[name][i] = scalar_data[name]
+
+    return snapshots
+
+def read_cell(path, istep=None, prefix=None):
+    if istep is None:
+        filename = path
+    else:
+        filename = os.path.join(path, config['FILENAME_FORMAT_DYABLO'].format(prefix=prefix, istep=istep))
     with h5py.File(filename, 'r') as f:
         connectivity = f['connectivity'][:]
         coordinates = f['coordinates'][:]
