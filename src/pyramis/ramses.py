@@ -9,7 +9,7 @@ from concurrent.futures import as_completed
 import configparser
 
 import re
-from . import get_config, get_dim_keys, get_position, get_velocity, get_vname, get_cell_size, cgs_unit, timer, format_bytes
+from . import get_config, get_dim_keys, get_position, get_velocity, get_vname, get_cell_size, cgs_unit, timer, format_bytes, ANY
 from .astro import get_cosmo_table, cosmo_convert
 from .core import compute_chunk_list_from_hilbert, str_to_tuple, quad_to_f16
 from pyramis.geometry import Region, Box
@@ -26,7 +26,7 @@ config = get_config()
 
 def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missing=False, namelist_path=None, scale_threshold=50.) -> np.ndarray:
     timer.start(f'Checking snapshots in {path} for {check_data}...')
-    pattern = os.path.join(path, config['OUTPUT_FORMAT_ANY'])
+    pattern = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=ANY))
     dirs = glob.glob(pattern)
     iout_list = []
     aexp_list = []
@@ -47,7 +47,7 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missi
         info = parse_info(info_path)
 
         for data in check_data:
-            file_pattern = os.path.join(d, config['FILENAME_FORMAT_RAMSES_ANY'].format(data=data, iout=iout))
+            file_pattern = os.path.join(d, config['FILENAME_FORMAT_RAMSES'].format(data=data, iout=iout, icpu=ANY))
             files = glob.glob(file_pattern)
             if len(files) != info['ncpu']:
                 if report_missing:
@@ -196,7 +196,7 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
     info['iout'] = iout
 
     if read_amr:
-        amr_files = glob.glob(os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES_ANY'].format(data='amr', iout=iout)))
+        amr_files = glob.glob(os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES'].format(data='amr', iout=iout, icpu=ANY)))
         if len(amr_files) == 0:
             raise FileNotFoundError(f"No AMR file found at iout = {iout} in {output_path}.")
 
@@ -261,7 +261,7 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
         info['kcoarse_min'] = coarse_min[2]
 
     if read_hydro:
-        hydro_files = glob.glob(os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES_ANY'].format(data='hydro', iout=iout)))
+        hydro_files = glob.glob(os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES'].format(data='hydro', iout=iout, icpu=ANY)))
         if len(hydro_files) > 0:
             hydro_path = hydro_files[0]
             timer.message(f"Reading hydro file: {hydro_path}...", 2)
@@ -1162,7 +1162,7 @@ def read_sink(
         dtype_out = np.dtype([(name, dtype_out.fields[name][0]) for name in target_fields if name in dtype_out.names])
     
     if icpu is None:
-        sink_files = glob.glob(os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES_ANY'].format(data='sink', iout=iout)))
+        sink_files = glob.glob(os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES'].format(data='sink', iout=iout, icpu=ANY)))
         if len(sink_files) == 0:
             return np.empty(0, dtype=dtype_out)
         filename = sink_files[0]
@@ -1230,7 +1230,7 @@ def read_sinkprops(
     else:
         mp_backend = "thread"
 
-    sinkprops_avail = glob.glob(os.path.join(path, config['FILENAME_FORMAT_SINKPROPS_ANY']))
+    sinkprops_avail = glob.glob(os.path.join(path, config['FILENAME_FORMAT_SINKPROPS'].format(icoarse=ANY)))
     icoarse_avail = np.array([int(os.path.basename(f).split('_')[1].split('.')[0]) for f in sinkprops_avail])
     if icoarse_max is not None and icoarse_max < 0:
         icoarse_max = np.max(icoarse_avail) + icoarse_max + 1

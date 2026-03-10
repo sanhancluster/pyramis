@@ -1,4 +1,4 @@
-# This file contains the default configuration settings for Pyramis. You can override these settings by creating a `config.toml` file in the same directory as your script or notebook, and specifying the desired settings there.
+# This file contains the default configuration settings for Pyramis. You can override these settings by creating a `config.toml` file in the configuration directory (~/.config/pyramis/).
 # Except for directory paths, changing the file name formats are not recommended.
 
 ## Verbosity level for logging. Higher values will produce more detailed logs.
@@ -6,28 +6,24 @@ VERBOSE_LEVEL = 1
 
 ## Directory paths for input and output data. You can change these to match your directory structure.
 OUTPUT_FORMAT = "output_{iout:05d}"
-OUTPUT_FORMAT_ANY = "output_*"
 
 FILENAME_FORMAT_RAMSES = "{data}_{iout:05d}.out{icpu:05d}"
-FILENAME_FORMAT_RAMSES_ANY = "{data}_{iout:05d}.out*"
 
 NAMELIST_FILENAME = "namelist.txt"
 FILE_DESCRIPTOR_FORMAT = "{data}_file_descriptor.txt"
 
-FILENAME_FORMAT_HDF = "hdf/{data}_{iout:05d}.h5"
-FILENAME_FORMAT_HDF_ANY = "hdf/{data}_*.h5"
+FILENAME_FORMAT_HDF = "{data}_{iout:05d}.h5"
 
-FILENAME_FORMAT_HALOMAKER = "halo/tree_bricks{iout:05d}"
-FILENAME_FORMAT_GALAXYMAKER = "galaxy/tree_bricks{iout:05d}"
-FILENAME_FORMAT_PTREE = "ptree/ptree_{iout:05d}.pkl"
+FILENAME_FORMAT_HALOMAKER = "tree_bricks{iout:05d}"
+FILENAME_FORMAT_GALAXYMAKER = "tree_bricks{iout:05d}"
+FILENAME_FORMAT_PTREE = "ptree_{iout:05d}.pkl"
+
+FILENAME_FORMAT_SINKPROPS = "sink_{icoarse:05d}.dat"
+
+FILENAME_FORMAT_DYABLO = "{prefix}_iter{istep:07d}.h5"
 
 ## Default variable name set to use when reading data. "native" and "simple" are possible.
 VNAME_SET = "native"
-
-FILENAME_FORMAT_SINKPROPS_ANY = "SINKPROPS/sink_*.dat"
-FILENAME_FORMAT_SINKPROPS = "SINKPROPS/sink_{icoarse:05d}.dat"
-
-FILENAME_FORMAT_DYABLO = "{prefix}_iter{istep:07d}.h5"
 
 ## Default settings for reading RAMSES output.
 ### Number of processes to use for parallel processing. "auto" will use all available CPU cores.

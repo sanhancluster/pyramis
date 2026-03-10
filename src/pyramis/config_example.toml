@@ -1,0 +1,13 @@
+# Put this file in ~/.config/pyramis/config.toml to override the default configuration.
+
+OUTPUT_FORMAT = "snapshots/output_{iout:05d}"
+
+FILENAME_FORMAT_HDF = "hdf/{data}_{iout:05d}.h5"
+
+FILENAME_FORMAT_HALOMAKER = "halo/tree_bricks{iout:05d}"
+FILENAME_FORMAT_GALAXYMAKER = "galaxy/tree_bricks{iout:05d}"
+FILENAME_FORMAT_PTREE = "ptree/ptree_{iout:05d}.pkl"
+
+FILENAME_FORMAT_SINKPROPS = "SINKPROPS/sink_{icoarse:05d}.dat"
+
+VNAME_SET="simple"

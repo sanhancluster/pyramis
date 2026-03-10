@@ -14,6 +14,7 @@ from .utils.arrayview import SharedView
 from .utils import get_mp_executor
 from. import ramses
 from .astro import get_cosmo_table, cosmo_convert
+from . import ANY
 
 from multiprocessing.shared_memory import SharedMemory
 
@@ -22,7 +23,7 @@ def check_snapshots(path: str, check_data=['cell', 'part']) -> np.ndarray:
     timer.start(f"Checking HDF snapshots at {path} for {check_data}...")
     iout_list = None
     for data in check_data:
-        pattern = config['FILENAME_FORMAT_HDF_ANY'].format(data=data)
+        pattern = config['FILENAME_FORMAT_HDF'].format(data=data, iout=ANY)
         files = glob.glob(os.path.join(path, pattern))
         iouts_data = []
         for f in files:
