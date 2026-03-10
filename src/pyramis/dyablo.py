@@ -44,10 +44,14 @@ def check_snapshots(path, prefix=None):
     return snapshots
 
 def read_cell(path, istep=None, prefix=None):
+
     if istep is None:
         filename = path
     else:
+        if prefix is None:
+            prefix = ANY
         filename = os.path.join(path, config['FILENAME_FORMAT_DYABLO'].format(prefix=prefix, istep=istep))
+
     with h5py.File(filename, 'r') as f:
         connectivity = f['connectivity'][:]
         coordinates = f['coordinates'][:]
