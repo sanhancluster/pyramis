@@ -85,3 +85,16 @@ def format_bytes(bytes):
         return f"{bytes / 1024**3:.2f} GiB"
     else:
         return f"{bytes / 1024**4:.2f} TiB"
+
+
+class Wildcard:
+    def __format__(self, format_spec):
+        return '*'
+    
+    def __str__(self):
+        return '*'
+    
+    def __eq__(self, other):
+        return True
+
+ANY = Wildcard()
