@@ -159,6 +159,24 @@ def read_halomaker_members(
         galaxy=False,
         double_precision: bool=True,
         return_nparts=False) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+    """
+    Reads the particle IDs of the halos from HaloMaker output.
+
+    Parameters
+    ----------
+    path : str
+        Path to the directory of the repository.
+    iout : int or None, optional
+        Output number to read. If None, the path is used directly. Default is None.
+    target_id : int, Sequence[int], np.ndarray, or None, optional
+        Halo ID(s) to read. If None, all halos are read. Default is None.
+    galaxy : bool, optional
+        Whether to read galaxy data. Default is False.
+    double_precision : bool, optional
+        Whether to read data in double precision. Default is True.
+    return_nparts : bool, optional
+        Whether to return the number of particles for each halo. Default is False.
+    """
 
     nskip = _get_halomaker_skip(galaxy=galaxy, double_precision=double_precision)
 
@@ -218,7 +236,7 @@ def read_halomaker_members(
     return members if not return_nparts else (members, nparts_arr)
 
 
-def read_ptree(path: str, iout:int | None=None, all=False):
+def read_ptree(path: str, iout:int | None=None):
     if iout is not None:
         path = os.path.join(path, config['FILENAME_FORMAT_PTREE'].format(iout=iout))
     return pkl.load(open(path, "rb"))
