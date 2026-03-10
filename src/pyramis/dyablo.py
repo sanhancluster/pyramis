@@ -1,15 +1,13 @@
-from fileinput import filename
 import warnings
 
-from . import config
-from .hdf import get_by_type
+from . import config, timer, ANY
 import h5py
 import os
 import numpy as np
 import glob
-from . import ANY
 
 def check_snapshots(path, prefix=None):
+    timer.start(f"Checking for Dyablo snapshots in {path} with prefix {prefix}...")
     if prefix is None:
         prefix = ANY
     pattern = os.path.join(path, config['FILENAME_FORMAT_DYABLO'].format(prefix=prefix, istep=ANY))
@@ -40,11 +38,11 @@ def check_snapshots(path, prefix=None):
             snapshots['istep'][i] = istep
             for name in scalar_data.keys():
                 snapshots[name][i] = scalar_data[name]
-
+    timer.record(f"Found {len(snapshots)} Dyablo snapshots in {path} with prefix {prefix}.")
     return snapshots
 
 def read_cell(path, istep=None, prefix=None):
-
+    timer.start(f"Reading Dyablo cell data from {path} with prefix {prefix} and istep {istep}...")
     if istep is None:
         filename = path
     else:
@@ -78,5 +76,5 @@ def read_cell(path, istep=None, prefix=None):
         table['position_y'] = centers[:, 1]
         table['position_z'] = centers[:, 2]
         table['level'] = levels
-
+    timer.record(f"Finished reading Dyablo cell data from {filename}. Found {n_data} cells.")
     return table

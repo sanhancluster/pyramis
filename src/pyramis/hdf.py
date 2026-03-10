@@ -62,7 +62,7 @@ def check_snapshots(path: str, check_data=['cell', 'part']) -> np.ndarray:
         [iout_list_new, aexp_list, time_list, nstep_coarse_list, np.zeros(len(iout_list_new), dtype=bool)],
         dtype=[('iout', 'i4'), ('aexp', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4'), ('scheduled', '?')])
     table = np.sort(table, order='iout')
-    timer.record(f"Found {table.size} snapshots.")
+    timer.record(f"Found {table.size} snapshots in {path} with data {check_data}.")
     return table
 
 
