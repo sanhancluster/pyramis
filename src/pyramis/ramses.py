@@ -24,6 +24,24 @@ from itertools import repeat
 
 config = get_config()
 
+def scheduled_snapshots(tout, time, t_thr, iout=None, report_missing=False):
+    scheduled = np.zeros(len(time), dtype=bool)
+    for t in tout:
+        diff = np.abs(time - t)
+        diff_masked = np.where(scheduled, np.inf, diff)
+        cand_key = np.argmin(diff_masked)
+        if np.abs(time[cand_key] - t) < t_thr[cand_key]:
+            scheduled[cand_key] = True
+        else:
+            if report_missing:
+                diff = np.abs(time[cand_key] - t)
+                message = f"No snapshot found at {t:.5f} (closest is {time[cand_key]:.5f} with difference {diff:.5f}, threshold ratio is {diff / t_thr[cand_key]:.5f})"                    
+                if iout is not None:
+                    message = message[:-1] + f", at iout={iout[cand_key]})"
+                timer.message(message)
+    return scheduled
+
+
 def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missing=False, namelist_path=None, scale_threshold=50.) -> np.ndarray:
     timer.start(f'Checking snapshots in {path} for {check_data}...')
     pattern = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=ANY))
@@ -88,31 +106,13 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missi
         a_thr = table['aexp'] / table['nstep_coarse'] * scale_threshold
     if len(tout) > 0:
         t_thr = table['time'] / table['nstep_coarse'] * scale_threshold
-
+    
     scheduled = np.zeros(len(table), dtype=bool)
     scheduled[0] = True # always include the first snapshot
-    for i, a in enumerate(aout):
-        # find the closest aexp in the table, except those already found
-        diff = np.abs(table['aexp'] - a)
-        diff_masked = np.where(scheduled, np.inf, diff)
-        cand_key = np.argmin(diff_masked)
-        cand = table[cand_key]
-        if np.abs(cand['aexp'] - a) < a_thr[cand_key]:
-            scheduled[cand_key] = True
-        else:
-            if a < np.max(table['aexp']):
-                timer.message(f"No snapshot found close enough to aexp={a:.5f} (closest is iout={cand['iout']}, aexp={cand['aexp']:.5f} with difference {np.abs(cand['aexp'] - a):.5f}, threshold is {a_thr[cand_key]:.5f})")
-    
-    for i, t in enumerate(tout):
-        diff = np.abs(table['time'] - t)
-        diff_masked = np.where(scheduled, np.inf, diff)
-        cand_key = np.argmin(diff_masked)
-        cand = table[cand_key]
-        if np.abs(cand['time'] - t) < t_thr[cand_key]:
-            scheduled[cand_key] = True
-        else:
-            if t < np.max(table['time']):
-                timer.message(f"No snapshot found close enough to time={t:.5f} (closest is iout={cand['iout']}, time={cand['time']:.5f} with difference {np.abs(cand['time'] - t):.5f}, threshold is {t_thr[cand_key]:.5f})")
+
+    scheduled |= scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
+    scheduled |= scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
+
     table['scheduled'] = scheduled
     timer.record(f'Checked snapshots in {path} for {check_data}. Found {len(table)} snapshots, with {np.sum(scheduled)} scheduled in namelist.')
 

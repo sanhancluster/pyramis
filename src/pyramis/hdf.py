@@ -15,11 +15,12 @@ from .utils import get_mp_executor
 from. import ramses
 from .astro import get_cosmo_table, cosmo_convert
 from . import ANY
+from .ramses import scheduled_snapshots
 
 from multiprocessing.shared_memory import SharedMemory
 
 
-def check_snapshots(path: str, check_data=['cell', 'part']) -> np.ndarray:
+def check_snapshots(path: str, check_data=['cell', 'part'], report_missing=False, scale_threshold=50.) -> np.ndarray:
     timer.start(f"Checking HDF snapshots at {path} for {check_data}...")
     iout_list = None
     for data in check_data:
@@ -45,7 +46,7 @@ def check_snapshots(path: str, check_data=['cell', 'part']) -> np.ndarray:
     if iout_list is None:
         iout_list = np.array([])
     
-    aexp_list, time_list, nstep_coarse_list = [], [], []
+    aexp_list, age_list, time_list, nstep_coarse_list = [], [], [], []
     iout_list_new = []
     for iout in iout_list:
         try:
@@ -55,13 +56,29 @@ def check_snapshots(path: str, check_data=['cell', 'part']) -> np.ndarray:
             continue
         iout_list_new.append(iout)
         aexp_list.append(info.get('aexp', 1.0))
-        time_list.append(info.get('age', 0.0))
+        age_list.append(info.get('age', 0.0))
+        time_list.append(info.get('time', 0.0))
         nstep_coarse_list.append(info.get('icoarse', 0))
 
     table = np.rec.fromarrays(
-        [iout_list_new, aexp_list, time_list, nstep_coarse_list, np.zeros(len(iout_list_new), dtype=bool)],
-        dtype=[('iout', 'i4'), ('aexp', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4'), ('scheduled', '?')])
+        [iout_list_new, aexp_list, age_list, time_list, nstep_coarse_list, np.zeros(len(iout_list_new), dtype=bool)],
+        dtype=[('iout', 'i4'), ('aexp', 'f8'), ('age', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4'), ('scheduled', '?')])
     table = np.sort(table, order='iout')
+
+    aout = info.get('aout', [])
+    if len(aout) > 0:
+        a_thr = table['aexp'] / table['nstep_coarse'] * scale_threshold
+
+    tout = info.get('tout', [])
+    if len(tout) > 0:
+        t_thr = table['time'] / table['nstep_coarse'] * scale_threshold
+
+    scheduled = np.zeros(len(table), dtype=bool)
+    scheduled[0] = True # always include the first snapshot
+    scheduled |= scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
+    scheduled |= scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
+    table['scheduled'] = scheduled
+
     timer.record(f"Found {table.size} snapshots in {path} with data {check_data}.")
     return table
 
@@ -743,21 +760,28 @@ def get_info(path: str, iout: int, cosmo=True, cosmo_table=None, check_data=['ce
     filenames = [fn for fn in filenames if os.path.exists(fn)]
     if len(filenames) == 0:
         raise FileNotFoundError(f"No HDF5 files found for iout={iout} in {path}")
-    filename = filenames[0]
-    timer.message(f"Reading simulation info from {filename}...", 2)
-    
-    with h5py.File(filename, 'r') as f:
-        attrs = dict(f.attrs)
-        if cosmo:
-            if cosmo_table is None:
-                H0 = attrs.get('H0', 70.0)
-                omega_m = attrs.get('omega_m', 0.3)
-                omega_l = attrs.get('omega_l', 0.7)
-                omega_k = attrs.get('omega_k', 0.0)
-                omega_r = attrs.get('omega_r', 0.0)
-                cosmo_table = get_cosmo_table(H0, omega_m, omega_l, omega_k=omega_k, omega_r=omega_r)
-            attrs['cosmo_table'] = cosmo_table
-            attrs['lookback_time'] = cosmo_convert(attrs['cosmo_table'], 1.0, 'aexp', 'age') / cgs_unit.Gyr - attrs['age']
+
+    attrs = None
+    for fn in filenames:
+        timer.message(f"Reading simulation info from {fn}...", 2)
+        try:
+            with h5py.File(fn, 'r') as f:
+                attrs = dict(f.attrs)
+                if cosmo:
+                    if cosmo_table is None:
+                        H0 = attrs.get('H0', 70.0)
+                        omega_m = attrs.get('omega_m', 0.3)
+                        omega_l = attrs.get('omega_l', 0.7)
+                        omega_k = attrs.get('omega_k', 0.0)
+                        omega_r = attrs.get('omega_r', 0.0)
+                        cosmo_table = get_cosmo_table(H0, omega_m, omega_l, omega_k=omega_k, omega_r=omega_r)
+                    attrs['cosmo_table'] = cosmo_table
+                    attrs['lookback_time'] = cosmo_convert(attrs['cosmo_table'], 1.0, 'aexp', 'age') / cgs_unit.Gyr - attrs['age']
+        except BlockingIOError:
+            timer.message(f"Skipping file {fn}, which is currently locked.")
+            continue
+    if attrs is None:
+        raise BlockingIOError(f"Could not read attributes from any file for iout={iout} in {path}")
 
     return attrs
 
