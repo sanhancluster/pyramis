@@ -41,11 +41,11 @@ def check_snapshots(path, prefix=None):
     timer.record(f"Found {len(snapshots)} Dyablo snapshots in {path} with prefix {prefix}.")
     return snapshots
 
-def read_cell(path, istep=None, prefix=None):
+def read_cell(path, iout=None, istep=None, prefix=None):
     timer.start(f"Reading Dyablo cell data from {path} with prefix {prefix} and istep {istep}...")
-    if istep is None:
-        filename = path
-    else:
+    if istep is not None:
+        if iout is not None:
+            warnings.warn("Both iout and istep are provided. Ignoring iout and using istep to find the file.")
         if prefix is None:
             pattern = os.path.join(path, config['FILENAME_FORMAT_DYABLO'].format(prefix=ANY, istep=istep))
             files = glob.glob(pattern)
@@ -56,6 +56,23 @@ def read_cell(path, istep=None, prefix=None):
             filename = files[0]
         else:
             filename = os.path.join(path, config['FILENAME_FORMAT_DYABLO'].format(prefix=prefix, istep=istep))
+    elif iout is not None:
+        if prefix is None:
+            pattern = os.path.join(path, config['FILENAME_FORMAT_DYABLO'].format(prefix=ANY, istep=ANY))
+        else:
+            pattern = os.path.join(path, config['FILENAME_FORMAT_DYABLO'].format(prefix=prefix, istep=ANY))
+
+        files = glob.glob(pattern)
+        if len(files) == 0:
+            raise FileNotFoundError(f"No files found matching pattern {pattern}.")
+        files.sort()
+        if iout > 0:
+            iout -= 1
+        elif iout == 0:
+            raise ValueError("iout cannot be 0. It should be a positive or negative integer.")
+        filename = files[iout]
+    else:
+        raise ValueError("Either iout or istep must be provided to find the file.")
 
     with h5py.File(filename, 'r') as f:
         connectivity = f['connectivity'][:]
@@ -64,12 +81,16 @@ def read_cell(path, istep=None, prefix=None):
         vertices = np.reshape(coordinates[connectivity], newshape=(-1, n_vertices, 3))
         domain_length_max = np.max(np.max(coordinates, axis=0) - np.min(coordinates, axis=0))
         centers = np.mean(vertices, axis=1)
-        levels = np.round(-np.log2((vertices[:, 1, 0] - vertices[:, 0, 0]) / domain_length_max)).astype(int)
+        dtypes = [('position_x', 'f8'), ('position_y', 'f8'), ('position_z', 'f8')]
+        if 'level' not in f.keys():
+            levels = np.round(-np.log2((vertices[:, 1, 0] - vertices[:, 0, 0]) / domain_length_max)).astype(int)
+            dtypes += [('level', 'i4')]
+        else:
+            levels = None
 
         n_data = connectivity.shape[0]
 
         keys = [k for k in f.keys() if k not in ['connectivity', 'coordinates', 'scalar_data']]
-        dtypes = [('position_x', 'f8'), ('position_y', 'f8'), ('position_z', 'f8'), ('level', 'i4')]
         
         for key in keys:
             dtypes.append((key, f[key].dtype))
@@ -82,6 +103,9 @@ def read_cell(path, istep=None, prefix=None):
         table['position_x'] = centers[:, 0]
         table['position_y'] = centers[:, 1]
         table['position_z'] = centers[:, 2]
-        table['level'] = levels
+
+        if levels is not None:
+            table['level'] = levels
+
     timer.record(f"Finished reading Dyablo cell data from {filename}. Found {n_data} cells.")
     return table
