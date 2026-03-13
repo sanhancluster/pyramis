@@ -318,7 +318,8 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
     else:
         iout_list = iout_list[np.isin(iout_list, iout_avail)]
 
-    info = ramses.get_info(path, iout_list[0])
+    timer.message(f"Getting info from snapshots in {path}, iout = {iout_list[-1]}...")
+    info = ramses.get_info(path, iout_list[-1])
     if size_load <= 0:
         size_load = info['ncpu']
 
@@ -671,7 +672,7 @@ def main():
 
         for key, value in config.items():
             setattr(args, key, value)
-    timer = Timestamp()
+
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print('-----------------------------------------------')
     print(f"RAMSES to HDF5: Script started at {now}")
@@ -720,6 +721,7 @@ def main():
     print(f"RAMSES to HDF5: Script completed at {now}")
     print('-----------------------------------------------')
 
+timer = Timestamp()
 
 if __name__ == '__main__':
     main()
