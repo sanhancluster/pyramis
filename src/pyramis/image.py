@@ -64,12 +64,26 @@ def crop(img, range, output_shape=None, subpixel=True, **kwargs):
     return img
 
 
-def grid_projection(centers, levels=None, quantities=None, weights=None, shape=None, lims: Box | np.ndarray | list | None=None,
-                    mode='sum', plot_method='hist', projector_kwargs={}, projection=None,
-                    interp_order=0, crop_mode='subpixel', output_dtype=np.float64, padding=0,
-                    type='particle', lims_domain=None):
+def grid_projection(
+        centers: np.ndarray | list,
+        levels: np.ndarray | list | None=None,
+        quantities: np.ndarray | list | None=None,
+        weights: np.ndarray | list | None=None,
+        shape: np.ndarray | list | int | tuple[int, int] | None=None,
+        lims: Box | np.ndarray | list | None=None,
+        mode: str='sum',
+        plot_method: str='hist',
+        projector_kwargs: dict={},
+        projection: list | None=None,
+        interp_order: int=0,
+        crop_mode: str='subpixel',
+        output_dtype: type=np.float64,
+        padding: int=0,
+        type: str='particle',
+        domain_lims: Box | np.ndarray | list | None=None,
+        coarse_bins: np.ndarray | int | list | None=None):
     """
-    Generate a 2D projection plot of a quantity using particle or AMR data.
+    Generate a 2D projection plot of a quantity along one of the axis using 3D particle or AMR data.
 
     Parameters:
     -----------
@@ -104,8 +118,10 @@ def grid_projection(centers, levels=None, quantities=None, weights=None, shape=N
         Number of padding pixels in the boundary to draw the data. Default is 0.
     type : str, optional
         Type of data. Options are 'particle' or 'amr'. Default is 'particle'.
-    lims_domain : list of list of float, optional
+    domain_lims : list of list of float, optional
         Domain limits for the data in the form [[xmin, xmax], [ymin, ymax], [zmin, zmax]] to used for calculating cell size based on levels. If None, defaults to [[0, 1], [0, 1], [0, 1]]. Default is None.
+    coarse_bins : int or list of int, optional
+        Number of coarse bins for the input AMR structure. If an integer is provided, it is used for all dimensions. If None, no coarse binning is applied. Default is None.
 
     Returns:
     --------
@@ -141,23 +157,39 @@ def grid_projection(centers, levels=None, quantities=None, weights=None, shape=N
     if projection is None:
         projection = get_dim_keys()[:ndim_proj]
 
-    # if lims is None, set all limits to [0, 1]
-    if not isinstance(lims, Box):
-        region = Box(lims)
+    # get the projection index for the given projection axes
+    proj = get_projection_index(projection, ndim=ndim_data)    
+    # get the z-axis that is not in the projection
+    proj_z = np.setdiff1d(np.arange(ndim_data), proj)[0]
+    
+    if coarse_bins is None:
+        coarse_bins = np.array([1, 1, 1])
+    elif np.isscalar(coarse_bins):
+        coarse_bins = np.repeat(coarse_bins, 3)
     else:
-        region = lims
-    lims = region.box
-    if lims is None:
-        if lims_domain is None:
-            lims = [[0, 1],] * ndim_data
-        else:
-            lims = lims_domain
-    lims = np.asarray(lims)
+        coarse_bins = np.asarray(coarse_bins)
+        if coarse_bins.shape != (3,):
+            raise ValueError("coarse_bins must be a scalar or an array of shape (3,)")
 
-    if lims_domain is None:
-        lims_domain = np.array([[0, 1],] * ndim_data)
-        lims_domain = np.stack([np.minimum(lims[:, 0], lims_domain[:, 0]), np.maximum(lims[:, 1], lims_domain[:, 1])], axis=-1)
-    lims_domain = np.asarray(lims_domain)
+    # if lims is None, set all limits to [0, 1]
+    if isinstance(lims, Box):
+        region = lims
+        lims = region.box
+    else:
+        if lims is None:
+            if domain_lims is None:
+                lims = [[0, 1],] * ndim_data
+            else:
+                lims = domain_lims
+        region = Box(lims)
+    lims = np.asarray(lims)
+    centers = np.asarray(centers)
+    levels = np.asarray(levels) if levels is not None else None
+
+    if domain_lims is None:
+        domain_lims = np.array([[0, 1],] * ndim_data)
+        domain_lims = np.stack([np.minimum(lims[:, 0], domain_lims[:, 0]), np.maximum(lims[:, 1], domain_lims[:, 1])], axis=-1)
+    domain_lims = np.asarray(domain_lims)
     # if quantities is None, set all quantities to 1
     if quantities is None:
         quantities = np.ones(centers.shape[0])
@@ -165,7 +197,7 @@ def grid_projection(centers, levels=None, quantities=None, weights=None, shape=N
     if weights is None:
         weights = np.ones_like(quantities)
     # if shape is scalar, make it a tuple
-    if np.isscalar(shape):
+    if isinstance(shape, int):
         shape = tuple(np.repeat(shape, 2))
     # if number of arrays does not match the number of quantities, raise an error
     if centers.shape[0] != len(quantities):
@@ -181,19 +213,17 @@ def grid_projection(centers, levels=None, quantities=None, weights=None, shape=N
     elif type in ['amr', 'cell', 'grid']:
         type = 'amr'
 
-    proj = get_projection_index(projection, ndim=ndim_data)
-    
-    # get the z-axis that is not in the projection
-    proj_z = np.setdiff1d(np.arange(ndim_data), proj)[0]
+    coarse_bins_2d = coarse_bins[proj]
     lims_2d = lims[proj]
 
     # size of the whole domain
-    domain_shape = np.array(lims_domain)[:, 1] - np.array(lims_domain)[:, 0]
-    domain_length_max = np.max(domain_shape)
-    lims_domain_2d = lims_domain[proj]
+    domain_extent = np.array(domain_lims)[:, 1] - np.array(domain_lims)[:, 0]
+    domain_extent_2d = domain_extent[proj]
+    # domain_length_max = np.max(domain_shape)
+    domain_lims_2d = domain_lims[proj]
 
-    # region of interest in the domain coordinates
-    scope = (lims - lims_domain[:, 0, np.newaxis]) / domain_length_max
+    # region of interest in the domain coordinate
+    scope = (lims - domain_lims[:, 0, np.newaxis]) / domain_extent[:, np.newaxis]
     scope_2d = scope[proj]
 
     if mode in ['sum', 'mean']:
@@ -215,23 +245,29 @@ def grid_projection(centers, levels=None, quantities=None, weights=None, shape=N
         levelmin_draw = levelmin
 
         if shape is None:
-            # if shape is not specified, draw with the full resolution
+            # if shape is not specified, assume drawing with the full resolution
             levelmax_draw = levelmax
-            dx_min = 2. ** -levelmax_draw
-            shape = (scope_2d[0, 1] - scope_2d[0, 0]) // dx_min, (scope_2d[1, 1] - scope_2d[1, 0]) // dx_min
+
+            # size of the smallest cell in projection axes in the drawing region in the domain coordinate
+            dx = (0.5 ** levelmax_draw) / coarse_bins_2d
+
+            shape = tuple(np.round((scope_2d[:, 1] - scope_2d[:, 0]) / dx[:, np.newaxis]).astype(int))
             if np.prod(shape) >= 1E8:
-                warnings.warn(f"The shape of the grid is too large: {shape}, it may cause memory issues.")
+                warnings.warn(f"The shape of the grid is too large: {shape}, it may cause memory issues.\nConsider setting a smaller shape manually.")
         else:
             # get the levels of the grid to draw the desired resolution
-            dx_min = np.minimum((scope_2d[0, 1] - scope_2d[0, 0]) / shape[0], (scope_2d[1, 1] - scope_2d[1, 0]) / shape[1])
+            dx_min = np.minimum(
+                (scope_2d[0, 1] - scope_2d[0, 0]) / coarse_bins_2d[0] / shape[0],
+                (scope_2d[1, 1] - scope_2d[1, 0]) / coarse_bins_2d[1] / shape[1])
             levelmax_draw = np.minimum(np.ceil(-np.log2(dx_min)).astype(int), levelmax)
     else:
         raise ValueError("Unknown type: %s. Supported types are 'part' and 'amr'." % type)
 
+    # compute the pixel size of the final image in each axis
     pixel_size = (lims_2d[:, 1] - lims_2d[:, 0]) / np.array(shape)
     if padding != 0:
         padding_size = np.asarray([0.]*ndim_data)
-        padding_size[proj] = pixel_size * padding
+        padding_size[proj] = pixel_size * padding * 2
     else:
         padding_size = 0.
 
@@ -242,18 +278,20 @@ def grid_projection(centers, levels=None, quantities=None, weights=None, shape=N
 
     elif type == 'amr':
         # get the smallest levelmin grid space that covers the whole region
-        i_lims_levelmin = scope_2d * 2**levelmin_draw
+        bins_levelmin = 2**levelmin_draw * coarse_bins_2d
+        i_lims_levelmin = scope_2d * bins_levelmin[:, np.newaxis]
         i_lims_levelmin[:, 0] = np.floor(i_lims_levelmin[:, 0])
         i_lims_levelmin[:, 1] = np.ceil(i_lims_levelmin[:, 1])
         i_lims_levelmin = i_lims_levelmin.astype(int)
 
+        # For amr, start from the coarsest grid shape to project lowest level cells.
         shape_grid = tuple(i_lims_levelmin[:, 1] - i_lims_levelmin[:, 0])
-        lims_2d_draw = (i_lims_levelmin / 2**levelmin_draw) * domain_length_max + lims_domain_2d[:, 0, np.newaxis]
+        lims_2d_draw = (i_lims_levelmin / bins_levelmin[:, np.newaxis]) * domain_extent_2d + domain_lims_2d[:, 0, np.newaxis]
 
         assert levels is not None
-        # get mask to draw the particles that are within the limits of the current drawing scope
+        # get mask to draw cells that are within the limits of the current drawing scope
         # apply padding to the limits
-        mask_draw = region.contains(centers, size=(0.5**levels * domain_length_max)[..., np.newaxis] + padding_size * 2)
+        mask_draw = region.contains(centers, size=(0.5**levels[:, np.newaxis] * domain_extent / coarse_bins) + padding_size)
         ll = levels[mask_draw]
     
     else:
@@ -329,8 +367,9 @@ def grid_projection(centers, levels=None, quantities=None, weights=None, shape=N
     return grid.T
 
 
-def part_projection(centers, quantities=None, weights=None, shape=100, lims=None,
-                    mode='sum', plot_method='hist', projection=None, output_dtype=np.float64, padding=0, lims_domain=None):
+def part_projection(
+        centers, quantities=None, weights=None, shape=100, lims=None,
+        mode='sum', plot_method='hist', projection=None, output_dtype=np.float64, padding=0, domain_lims=None):
     """
     Generate a 2D projection plot of a quantity using particle data.
 
@@ -360,11 +399,14 @@ def part_projection(centers, quantities=None, weights=None, shape=100, lims=None
     grid : np.ndarray
         2D array representing the projected quantity.
     """
-    return grid_projection(centers=centers, levels=None, quantities=quantities, weights=weights, shape=shape, lims=lims, mode=mode, plot_method=plot_method, projection=projection, output_dtype=output_dtype, padding=padding, type='particle', lims_domain=lims_domain)
+    return grid_projection(
+        centers=centers, levels=None, quantities=quantities, weights=weights, shape=shape, lims=lims,
+        mode=mode, plot_method=plot_method, projection=projection, output_dtype=output_dtype, padding=padding, type='particle', domain_lims=domain_lims)
 
 
-def amr_projection(centers, levels, quantities=None, weights=None, shape=None, lims=None,
-                   mode='sum', plot_method='hist', projection=None, interp_order=0, output_dtype=np.float64, padding=0, crop_mode='subpixel', lims_domain=None):
+def amr_projection(
+        centers, levels, quantities=None, weights=None, shape=None, lims=None,
+        mode='sum', plot_method='hist', projection=None, interp_order=0, output_dtype=np.float64, padding=0, crop_mode='subpixel', domain_lims=None, coarse_bins=None):
     """
     Generate a 2D projection plot of a quantity using Adaptive Mesh Refinement (AMR) data.
 
@@ -396,7 +438,10 @@ def amr_projection(centers, levels, quantities=None, weights=None, shape=None, l
     grid : np.ndarray
         2D array representing the projected quantity.
     """
-    return grid_projection(centers=centers, levels=levels, quantities=quantities, weights=weights, shape=shape, lims=lims, mode=mode, plot_method=plot_method, projection=projection, interp_order=interp_order, crop_mode=crop_mode, output_dtype=output_dtype, padding=padding, type='amr', lims_domain=lims_domain)
+    return grid_projection(
+        centers=centers, levels=levels, quantities=quantities, weights=weights, shape=shape, lims=lims,
+        mode=mode, plot_method=plot_method, projection=projection, interp_order=interp_order, crop_mode=crop_mode,
+        output_dtype=output_dtype, padding=padding, type='amr', domain_lims=domain_lims, coarse_bins=coarse_bins)
 
 
 def density_2d(x, y, lims, shape=100, weights=None, density=False, method='hist', **kwargs):
