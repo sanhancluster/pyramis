@@ -317,6 +317,9 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
         iout_list = iout_avail
     else:
         iout_list = iout_list[np.isin(iout_list, iout_avail)]
+    if len(iout_list) == 0:
+        timer.message(f"No snapshots found in {path} with the specified iout list. Exiting.")
+        return
 
     timer.message(f"Getting info from snapshots in {path}, iout = {iout_list[-1]}...")
     info = ramses.get_info(path, iout_list[-1])
