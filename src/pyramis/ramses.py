@@ -42,7 +42,7 @@ def scheduled_snapshots(tout, time, t_thr, iout=None, report_missing=False):
     return scheduled
 
 
-def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missing=False, namelist_path=None, scale_threshold=50.) -> np.ndarray:
+def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], iout_min=None, iout_max=None, report_missing=False, namelist_path=None, scale_threshold=50.) -> np.ndarray:
     timer.start(f'Checking snapshots in {path} for {check_data}...')
     pattern = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=ANY))
     dirs = glob.glob(pattern)
@@ -55,6 +55,10 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missi
         ok = True
 
         iout = int(basename.split('_')[-1])
+        if iout_min is not None and iout < iout_min:
+            continue
+        if iout_max is not None and iout > iout_max:
+            continue
         info_path = os.path.join(d, f'info_{iout:05d}.txt')
 
         if os.path.exists(info_path) is False:
@@ -102,16 +106,16 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], report_missi
         if 'tout' in nml['OUTPUT_PARAMS']:
             tout = np.array(tuple(nml['OUTPUT_PARAMS']['tout'].split(','))).astype(np.float64)
 
-    if len(aout) > 0:
-        a_thr = table['aexp'] / table['nstep_coarse'] * scale_threshold
-    if len(tout) > 0:
-        t_thr = table['time'] / table['nstep_coarse'] * scale_threshold
     
     scheduled = np.zeros(len(table), dtype=bool)
     scheduled[0] = True # always include the first snapshot
 
-    scheduled |= scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
-    scheduled |= scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
+    if len(aout) > 0:
+        a_thr = table['aexp'] / table['nstep_coarse'] * scale_threshold
+        scheduled |= scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
+    if len(tout) > 0:
+        t_thr = table['time'] / table['nstep_coarse'] * scale_threshold
+        scheduled |= scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
 
     table['scheduled'] = scheduled
     timer.record(f'Checked snapshots in {path} for {check_data}. Found {len(table)} snapshots, with {np.sum(scheduled)} scheduled in namelist.')
