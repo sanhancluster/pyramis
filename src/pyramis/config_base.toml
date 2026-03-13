@@ -20,7 +20,10 @@ FILENAME_FORMAT_PTREE = "ptree_{iout:05d}.pkl"
 
 FILENAME_FORMAT_SINKPROPS = "sink_{icoarse:05d}.dat"
 
+## Dyablo specific settings
 FILENAME_FORMAT_DYABLO = "{prefix}_iter{istep:07d}.h5"
+LAST_INI_FILENAME = "last.ini"
+DEFAULT_COARSE_BINS_DYABLO = [4, 4, 4]
 
 ## Default variable name set to use when reading data. "native" and "simple" are possible.
 VNAME_SET = "native"
