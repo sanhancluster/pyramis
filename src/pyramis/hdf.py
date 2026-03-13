@@ -23,6 +23,10 @@ from multiprocessing.shared_memory import SharedMemory
 def check_snapshots(path: str, check_data=['cell', 'part'], report_missing=False, scale_threshold=50.) -> np.ndarray:
     timer.start(f"Checking HDF snapshots at {path} for {check_data}...")
     iout_list = None
+    if isinstance(check_data, str):
+        check_data = [check_data]
+    if len(check_data) == 0:
+        raise ValueError("check_data cannot be empty. Please specify at least one of 'cell' or 'part'.")
     for data in check_data:
         pattern = config['FILENAME_FORMAT_HDF'].format(data=data, iout=ANY)
         files = glob.glob(os.path.join(path, pattern))
@@ -48,6 +52,7 @@ def check_snapshots(path: str, check_data=['cell', 'part'], report_missing=False
     
     aexp_list, age_list, time_list, nstep_coarse_list = [], [], [], []
     iout_list_new = []
+    aout, tout = None, None
     for iout in iout_list:
         try:
             info = get_info(path, iout, cosmo=False, check_data=check_data)
@@ -59,24 +64,25 @@ def check_snapshots(path: str, check_data=['cell', 'part'], report_missing=False
         age_list.append(info.get('age', 0.0))
         time_list.append(info.get('time', 0.0))
         nstep_coarse_list.append(info.get('icoarse', 0))
+        aout = info.get('aout', aout)
+        tout = info.get('tout', tout)
 
     table = np.rec.fromarrays(
         [iout_list_new, aexp_list, age_list, time_list, nstep_coarse_list, np.zeros(len(iout_list_new), dtype=bool)],
         dtype=[('iout', 'i4'), ('aexp', 'f8'), ('age', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4'), ('scheduled', '?')])
     table = np.sort(table, order='iout')
 
-    aout = info.get('aout', [])
-    if len(aout) > 0:
-        a_thr = table['aexp'] / table['nstep_coarse'] * scale_threshold
-
-    tout = info.get('tout', [])
-    if len(tout) > 0:
-        t_thr = table['time'] / table['nstep_coarse'] * scale_threshold
-
     scheduled = np.zeros(len(table), dtype=bool)
     scheduled[0] = True # always include the first snapshot
-    scheduled |= scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
-    scheduled |= scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
+
+    if aout is not None and len(aout) > 0:
+        a_thr = table['aexp'] / table['nstep_coarse'] * scale_threshold
+        scheduled |= scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
+
+    if tout is not None and len(tout) > 0:
+        t_thr = table['time'] / table['nstep_coarse'] * scale_threshold
+        scheduled |= scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
+
     table['scheduled'] = scheduled
 
     timer.record(f"Found {table.size} snapshots in {path} with data {check_data}.")

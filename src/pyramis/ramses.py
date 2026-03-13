@@ -25,6 +25,7 @@ from itertools import repeat
 config = get_config()
 
 def scheduled_snapshots(tout, time, t_thr, iout=None, report_missing=False):
+    tout = np.unique(tout)
     scheduled = np.zeros(len(time), dtype=bool)
     for t in tout:
         diff = np.abs(time - t)
@@ -50,6 +51,7 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], iout_min=Non
     aexp_list = []
     time_list = []
     nstep_coarse_list = []
+    aout, tout = None, None
     for d in dirs:
         basename = os.path.basename(d)
         ok = True
@@ -80,21 +82,13 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], iout_min=Non
             aexp_list.append(info['aexp'])
             time_list.append(info['time'])
             nstep_coarse_list.append(info['nstep_coarse'])
+            aout = info.get('aout', aout)
+            tout = info.get('tout', tout)
     
     table = np.rec.fromarrays([iout_list, aexp_list, time_list, nstep_coarse_list, np.zeros(len(iout_list), dtype=bool)], dtype=[('iout', 'i4'), ('aexp', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4'), ('scheduled', '?')])
     table.sort(order='iout')
 
-    # get the latest snapshot info
-    iout_check = table['iout'][-1]
-    info = get_info(path, iout_check, namelist_path=namelist_path, read_amr=False, read_hydro=False)
-
-    aout, tout = [], []
-    if 'aout' in info:
-        aout = np.array(info['aout'])
-    if 'tout' in info:
-        tout = np.array(info['tout'])
-
-    if 'aout' not in info and 'tout' not in info:
+    if aout is None and tout is None:
         if namelist_path is None:
             namelist_path = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout_check), config['NAMELIST_FILENAME'])
         nml = parse_namelist(namelist_path)
@@ -105,15 +99,17 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], iout_min=Non
             aout = np.array(tuple(nml['OUTPUT_PARAMS']['aout'].split(','))).astype(np.float64)
         if 'tout' in nml['OUTPUT_PARAMS']:
             tout = np.array(tuple(nml['OUTPUT_PARAMS']['tout'].split(','))).astype(np.float64)
-
+    else:
+        aout = np.array(aout)
+        tout = np.array(tout)
     
     scheduled = np.zeros(len(table), dtype=bool)
     scheduled[0] = True # always include the first snapshot
 
-    if len(aout) > 0:
+    if aout is not None and len(aout) > 0:
         a_thr = table['aexp'] / table['nstep_coarse'] * scale_threshold
         scheduled |= scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
-    if len(tout) > 0:
+    if tout is not None and len(tout) > 0:
         t_thr = table['time'] / table['nstep_coarse'] * scale_threshold
         scheduled |= scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
 
