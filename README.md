@@ -10,6 +10,7 @@ pip install pyramis
 ```bash
 git clone https://github.com/sanhancluster/pyramis
 cd pyramis
+
 pip install -e .
 ```
 ### Using conda
@@ -17,17 +18,21 @@ To create new conda environment specifically for Pyramis,
 ```bash
 git clone https://github.com/sanhancluster/pyramis
 cd pyramis
+
 conda env create -f environment.yml
 conda activate pyramis
-pip install -e .
+
+python -m pip install -e .
 ```
 If you want to install in an already existing environment,
 ```bash
 git clone https://github.com/sanhancluster/pyramis
 cd pyramis
+
 conda activate myenv
 conda env update -f environment.yml
-pip install -e .
+
+python -m pip install -e .
 ```
 
 ## How to use
