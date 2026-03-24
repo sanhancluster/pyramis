@@ -26,20 +26,33 @@ config = get_config()
 
 def scheduled_snapshots(tout, time, t_thr, iout=None, report_missing=False):
     tout = np.unique(tout)
+    tout = np.sort(tout)
     scheduled = np.zeros(len(time), dtype=bool)
+    n_below, n_above, n_between = 0, 0, 0
     for t in tout:
         diff = np.abs(time - t)
         diff_masked = np.where(scheduled, np.inf, diff)
         cand_key = np.argmin(diff_masked)
         if np.abs(time[cand_key] - t) < t_thr[cand_key]:
             scheduled[cand_key] = True
+        elif t < np.min(time):
+            n_below += 1
+        elif t > np.max(time):
+            n_above += 1
         else:
+            n_between += 1
             if report_missing:
-                diff = np.abs(time[cand_key] - t)
-                message = f"No snapshot found at {t:.5f} (closest is {time[cand_key]:.5f} with difference {diff:.5f}, threshold ratio is {diff / t_thr[cand_key]:.5f})"                    
+                offset = (time[cand_key] - t)
+                message = f"No snapshot found at {t:.5f} (closest is {time[cand_key]:.5f} with offset {offset:.5f}, threshold is {t_thr[cand_key]:.5f})"
                 if iout is not None:
                     message = message[:-1] + f", at iout={iout[cand_key]})"
                 timer.message(message)
+    if n_below > 0 or n_above > 0 or n_between > 0:
+        if report_missing:
+            message = f"There are {n_below} missing snapshots below the first snapshot, {n_between} in between, {n_above} above the last snapshot."
+            if iout is not None:
+                message = message[:-1] + f", with iout range [{iout[np.argmin(time)]}, {iout[np.argmax(time)]}])"
+            timer.message(message)
     return scheduled
 
 
@@ -90,7 +103,7 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], iout_min=Non
 
     if aout is None and tout is None:
         if namelist_path is None:
-            namelist_path = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout_check), config['NAMELIST_FILENAME'])
+            namelist_path = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout_list[-1]), config['NAMELIST_FILENAME'])
         nml = parse_namelist(namelist_path)
 
         scheduled = np.zeros(len(table), dtype=bool)
@@ -104,12 +117,12 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], iout_min=Non
         tout = np.array(tout)
     
     scheduled = np.zeros(len(table), dtype=bool)
-    scheduled[0] = True # always include the first snapshot
+    scheduled[table['iout'] == 1] = True # always include the first snapshot
 
-    if aout is not None and len(aout) > 0:
+    if aout is not None and len(aout) > 0 and not np.all(aout == 0.0):
         a_thr = table['aexp'] / table['nstep_coarse'] * scale_threshold
         scheduled |= scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
-    if tout is not None and len(tout) > 0:
+    if tout is not None and len(tout) > 0 and not np.all(tout == 0.0):
         t_thr = table['time'] / table['nstep_coarse'] * scale_threshold
         scheduled |= scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
 
