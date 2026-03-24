@@ -796,6 +796,16 @@ def get_info(path: str, iout: int, cosmo=True, cosmo_table=None, check_data=['ce
     return attrs
 
 
+def get_ndata(path, data, iout, data_type):
+    filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data=data, iout=iout))
+    with h5py.File(filename, 'r') as f:
+        if data_type in f.keys():
+            group = get_by_type(f, data_type, h5py.Group)
+            return group.attrs['size']
+        else:
+            return 0
+
+
 def repack(path, path_new):
     def copy_attrs(src, dst):
         """Recursively copy all attributes"""
