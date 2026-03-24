@@ -3,7 +3,7 @@ import numpy as np
 
 from .geometry import Box, Region
 from .utils import hilbert3d
-from . import config
+from . import config, timer
 
 def domain_slice(data, domain_list, bounds):
     """
@@ -19,7 +19,7 @@ def domain_slice(data, domain_list, bounds):
     return merged
 
 
-def compute_chunk_list_from_hilbert(region: Union[Region, np.ndarray, list], hilbert_boundary, level_hilbert, boxlen: float=1.0, level_divide=None, level_subdivide: int=config['DEFAULT_LEVEL_SUBDIVIDE'], ndim: int=3) -> np.ndarray:
+def compute_chunk_list_from_hilbert(region: Union[Region, np.ndarray, list], hilbert_boundary, level_hilbert, boxlen: float=1.0, level_divide=None, level_subdivide: int | None=None, ndim: int=3) -> np.ndarray:
     """
     Computes the list of chunk indices that intersect with the given region based on 3-dimensional Hilbert curve partitioning.
 
@@ -35,9 +35,12 @@ def compute_chunk_list_from_hilbert(region: Union[Region, np.ndarray, list], hil
         The size of the entire box in which the Hilbert curve is defined.
     level_divide : int, optional
         The level at which to divide the Hilbert curve for chunking. If None, it is computed based on the region size.
-    level_subdivide : int
-        Additional subdivision level to refine the chunking.
+    level_subdivide : int | None, optional
+        Additional subdivision level to refine the chunking. If None, the default value from the config is used.
     """
+    timer.message("Computing chunk list from Hilbert curve...", verbose_lim=2)
+    if level_subdivide is None:
+        level_subdivide = config['DEFAULT_LEVEL_SUBDIVIDE']
     assert_ascending(hilbert_boundary)
     if isinstance(region, Region):
         bounding_box = region.bounding_box.box
@@ -48,12 +51,17 @@ def compute_chunk_list_from_hilbert(region: Union[Region, np.ndarray, list], hil
         raise ValueError("region must be either a Region instance or a (ndim, 2) ndarray representing a bounding box.")
     
     if level_divide is None:
-        level_divide = -int(np.floor(np.log2(np.min(bounding_box[:, 1] - bounding_box[:, 0]) / boxlen))) + level_subdivide
+        minlen = np.min(bounding_box[:, 1] - bounding_box[:, 0])
+        if minlen <= 0:
+            return np.array([], dtype=np.int32)
+
+        level_divide = -int(np.floor(np.log2(minlen / boxlen))) + level_subdivide
     level_divide = np.minimum(level_divide, level_hilbert)
     grid_size = boxlen * np.exp2(-level_divide)
     
-    min_idx = np.floor(bounding_box[:, 0] / grid_size).astype(np.int64)
-    max_idx = np.ceil(bounding_box[:, 1] / grid_size).astype(np.int64)
+    min_idx = np.floor(bounding_box[:, 0] / grid_size).astype(np.int32)
+    max_idx = np.ceil(bounding_box[:, 1] / grid_size).astype(np.int32)
+    timer.message(f"Using level_divide={level_divide} for chunking (grid size: {grid_size:.4f}).", verbose_lim=3)
     
     grid_x, grid_y, grid_z = np.meshgrid(
         np.arange(min_idx[0], max_idx[0]),
@@ -70,6 +78,7 @@ def compute_chunk_list_from_hilbert(region: Union[Region, np.ndarray, list], hil
     chunk_indices_max = np.searchsorted(hilbert_boundary, hilbert_keys_max, side='left') - 1
 
     chunk_indices = np.unique(np.concatenate([np.arange(start, end + 1) for start, end in zip(chunk_indices_min, chunk_indices_max)]))
+    timer.message(f"Found {len(chunk_indices)} chunks intersecting the region.", verbose_lim=3)
     return np.sort(chunk_indices)
 
 
