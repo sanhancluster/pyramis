@@ -14,7 +14,9 @@ def in_jupyter() -> bool:
         return False
 
 
-def get_mp_context():
+def get_mp_context(method=None):
+    if method is not None:
+        return mp.get_context(method)
     if in_jupyter():
         return mp.get_context("spawn")
     try:
@@ -23,11 +25,11 @@ def get_mp_context():
         return mp.get_context("spawn")
 
 
-def get_mp_executor(backend: str="thread", n_workers: int | None=None):
+def get_mp_executor(backend: str="thread", n_workers: int | None=None, method: str | None=None):
     if n_workers is None:
         n_workers = config['DEFAULT_N_PROCS']
 
-    ctx = get_mp_context()
+    ctx = get_mp_context(method)
 
     Executor = ProcessPoolExecutor if backend == "process" else ThreadPoolExecutor
     executor_kwargs: dict = {'max_workers': n_workers}
