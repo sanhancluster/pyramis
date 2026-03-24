@@ -7,7 +7,7 @@ from typing import Sequence
 from concurrent.futures import as_completed
 import warnings
 
-from . import config, get_dim_keys, get_vname, get_mapping, cgs_unit, timer
+from . import get_config, get_dim_keys, get_vname, get_mapping, cgs_unit, timer
 from .core import compute_chunk_list_from_hilbert
 from .geometry import Region, Box
 from .utils.arrayview import SharedView
@@ -19,8 +19,10 @@ from .ramses import scheduled_snapshots
 
 from multiprocessing.shared_memory import SharedMemory
 
+config = get_config()
 
-def check_snapshots(path: str, check_data=['cell', 'part'], report_missing=False, scale_threshold=50.) -> np.ndarray:
+
+def check_snapshots(path: str, check_data=['cell', 'part'], check_info=True, report_missing=False, scale_threshold=50.) -> np.ndarray:
     timer.start(f"Checking HDF snapshots at {path} for {check_data}...")
     iout_list = None
     if isinstance(check_data, str):
@@ -53,33 +55,37 @@ def check_snapshots(path: str, check_data=['cell', 'part'], report_missing=False
     aexp_list, age_list, time_list, nstep_coarse_list = [], [], [], []
     iout_list_new = []
     aout, tout = None, None
-    for iout in iout_list:
-        try:
-            info = get_info(path, iout, cosmo=False, check_data=check_data)
-        except BlockingIOError:
-            timer.message(f"Skipping file for iout={iout}, which is currently locked.")
-            continue
-        iout_list_new.append(iout)
-        aexp_list.append(info.get('aexp', 1.0))
-        age_list.append(info.get('age', 0.0))
-        time_list.append(info.get('time', 0.0))
-        nstep_coarse_list.append(info.get('icoarse', 0))
-        aout = info.get('aout', aout)
-        tout = info.get('tout', tout)
+    if check_info:
+        for iout in iout_list:
+            try:
+                info = get_info(path, iout, cosmo=False, check_data=check_data)
+            except BlockingIOError:
+                timer.message(f"Skipping file for iout={iout}, which is currently locked.")
+                continue
+            iout_list_new.append(iout)
+            aexp_list.append(info.get('aexp', 1.0))
+            age_list.append(info.get('age', 0.0))
+            time_list.append(info.get('time', 0.0))
+            nstep_coarse_list.append(info.get('icoarse', 0))
+            aout = info.get('aout', aout)
+            tout = info.get('tout', tout)
 
-    table = np.rec.fromarrays(
-        [iout_list_new, aexp_list, age_list, time_list, nstep_coarse_list, np.zeros(len(iout_list_new), dtype=bool)],
-        dtype=[('iout', 'i4'), ('aexp', 'f8'), ('age', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4'), ('scheduled', '?')])
+        table = np.rec.fromarrays(
+            [iout_list_new, aexp_list, age_list, time_list, nstep_coarse_list, np.zeros(len(iout_list_new), dtype=bool)],
+            dtype=[('iout', 'i4'), ('aexp', 'f8'), ('age', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4'), ('scheduled', '?')])
+    else:
+        table = np.rec.fromarrays(
+            [iout_list], dtype=[('iout', 'i4')])
     table = np.sort(table, order='iout')
 
     scheduled = np.zeros(len(table), dtype=bool)
-    scheduled[0] = True # always include the first snapshot
+    scheduled[table['iout'] == 1] = True # always include the first snapshot
 
-    if aout is not None and len(aout) > 0:
+    if aout is not None and len(aout) > 0 and not np.all(aout == 0.0):
         a_thr = table['aexp'] / table['nstep_coarse'] * scale_threshold
         scheduled |= scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
 
-    if tout is not None and len(tout) > 0:
+    if tout is not None and len(tout) > 0 and not np.all(tout == 0.0):
         t_thr = table['time'] / table['nstep_coarse'] * scale_threshold
         scheduled |= scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
 
@@ -697,8 +703,6 @@ def read_sinkprops(
                     data_slice = data[offset:offset+size]
                     if target_fields_file is not None:
                         data_slice = data_slice.fields(target_fields_file)
-                    else:
-                        data_slice = data_slice
                     data_array[start:start+size] = data_slice
                     start += size
                 if icoarse_max is not None or icoarse_min is not None:
