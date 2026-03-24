@@ -11,13 +11,13 @@ from typing import Optional, Tuple
 
 from pyramis.utils import Timestamp, hilbert3d_map
 from pyramis.utils.arrayview import SharedView
-from pyramis import get_dim_keys, ramses
+from pyramis import get_dim_keys, ramses, hdf
 import tomllib
 
 ramses.config['VNAME_SET'] = 'native' # Recommended to use native variable names
 
 
-def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=False, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8, update_attributes=False):
+def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=False, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8, update_attributes=False, no_input=False):
     info = ramses.get_info(path, iout)
 
     if cpu_list is None:
@@ -28,7 +28,7 @@ def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
     output_dir = os.path.join(path, output_path)
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, f'part_{iout:05d}.h5')
-    if os.path.exists(output_file) and not overwrite:
+    if os.path.exists(output_file) and not overwrite and not (update_attributes or no_input):
         try:
             with h5py.File(output_file, 'r') as fl:
                 if Version(fl.attrs.get('version', '0.0')) < Version(version):
@@ -40,13 +40,13 @@ def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
         except (KeyError, OSError) as e:
             print(f"File {output_file} exists but is not a valid HDF5 file. Overwriting.")
     
-    if not update_attributes:
+    if not update_attributes and not no_input:
         timer.message(f"Generating new part dictionary for iout = {iout} with {len(cpu_list)} CPUs...")
         new_part_dict, pointer_dict = get_new_part_dict(path, iout, cpu_list=cpu_list, size_load=size_load, converted_dtypes=converted_dtypes, nthread=nthread)
         names = new_part_dict.keys()
-        timer.message(f"Creating HDF5 file {output_file} with {len(new_part_dict)} particle types...")
+        timer.message(f"Creating HDF5 file {output_file} with {len(new_part_dict)} particle types...")        
 
-    open_mode = 'w' if not update_attributes else 'r+'
+    open_mode = 'w' if not (update_attributes or no_input) else 'r+'
     with h5py.File(output_file, open_mode) as fl:
         fl.attrs['publication'] = sim_publication
         fl.attrs['description'] = 'Ramses particle data' \
@@ -77,6 +77,15 @@ def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
         add_attr_with_descr(fl, 'n_chunk', n_chunk, 'Number of chunks in the snapshot.')
 
         add_attr_with_descr(fl, 'script', os.path.basename(__file__), 'Name of the script used to generate the file.')
+
+        if no_input:
+            names = fl.keys()
+            new_part_dict = {}
+            pointer_dict = {}
+            timer.message(f"Using existing data for {list(names)} particle types in {output_file}...")
+            for name in names:
+                new_part_dict[name] = fl[name]['data'][:]
+                pointer_dict[name] = new_part_dict[name].shape[0]
 
         if not update_attributes:
             n_part_tot = 0
@@ -185,7 +194,7 @@ def compute_key_boundaries(key_array: np.ndarray, n_key: int) -> np.ndarray:
     return key_boundaries
 
 
-def create_hdf5_cell(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=True, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8, update_attributes=False):
+def create_hdf5_cell(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=True, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8, update_attributes=False, no_input=False):
     """
     Export cell data from the snapshot to HDF5 format.
     """
@@ -198,7 +207,7 @@ def create_hdf5_cell(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
     output_dir = os.path.join(path, output_path)
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, f'cell_{iout:05d}.h5')
-    if os.path.exists(output_file) and not overwrite:
+    if os.path.exists(output_file) and not overwrite and not (update_attributes or no_input):
         try:
             with h5py.File(output_file, 'r') as fl:
                 if Version(fl.attrs.get('version', '0.0')) < Version(version):
@@ -210,7 +219,8 @@ def create_hdf5_cell(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
         except (OSError, KeyError) as e:
             print(f"File {output_file} exists but is not a valid HDF5 file. Overwriting.")
     timer.message(f"Creating HDF5 file {output_file} for cells...")
-    with h5py.File(output_file, 'w') as fl:
+    open_mode = 'w' if not (update_attributes or no_input) else 'r+'
+    with h5py.File(output_file, open_mode) as fl:
         fl.attrs['publication'] = sim_publication
         fl.attrs['description'] = 'Ramses cell/AMR data' \
         "\n============================================================================" \
@@ -237,6 +247,8 @@ def create_hdf5_cell(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
         add_attr_with_descr(fl, 'n_level', n_level, 'Number of levels in the snapshot.')
         add_attr_with_descr(fl, 'n_chunk', n_chunk, 'Number of chunks in the snapshot.')
 
+        add_attr_with_descr(fl, 'script', os.path.basename(__file__), 'Name of the script used to generate the file.')
+
         if not update_attributes:
             n_cell_tot = 0
             read_branch = None
@@ -248,7 +260,11 @@ def create_hdf5_cell(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
                     read_branch = True
                 else:
                     raise ValueError(f"Unknown cell type: {name}")
-                new_cell, pointer = get_new_cell(path, iout, cpu_list=cpu_list, size_load=size_load, converted_dtypes=converted_dtypes, read_branch=read_branch, nthread=nthread)
+                if not no_input:
+                    new_cell, pointer = get_new_cell(path, iout, cpu_list=cpu_list, size_load=size_load, converted_dtypes=converted_dtypes, read_branch=read_branch, nthread=nthread)
+                else:
+                    new_cell = fl[name]['data'][:]
+                    pointer = new_cell.shape[0]
                 new_cell = new_cell[:pointer]
 
                 # Add cell data to HDF5 file
@@ -305,14 +321,26 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
     return new_cell, pointer
 
 
-def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=None, converted_dtypes_cell=None, output_path:str='hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=False, sim_description:str='', sim_publication:str='', version:str='1.0', nthread:int=8, walltime=None, convert_part=True, convert_cell=True, update_attributes=False):
+def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=None, converted_dtypes_cell=None, output_path:str='hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=False, sim_description:str='', sim_publication:str='', version:str='1.0', nthread:int=8, walltime=None, convert_part=True, convert_cell=True, update_attributes=False, no_input=False):
     """
     Export snapshots from the repository to HDF5 format.
     This function will export both particle and cell data.
     """
 
     vname_abbr = ramses.config['VNAME_MAPPING'][ramses.config['VNAME_SET']]
-    iout_avail = ramses.check_snapshots(path, check_data=['amr', 'hydro', 'part', 'grav'])['iout']
+    check_data = []
+    if not (update_attributes or no_input):
+        if convert_cell:
+            check_data += ['amr', 'hydro', 'grav']
+        if convert_part:
+            check_data += ['part']
+        iout_avail = ramses.check_snapshots(path, check_data=check_data)['iout']
+    else:
+        if convert_cell:
+            check_data += ['cell']
+        if convert_part:
+            check_data += ['part']
+        iout_avail = hdf.check_snapshots(path, check_data=check_data)['iout']
     if iout_list is None:
         iout_list = iout_avail
     else:
@@ -327,7 +355,6 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
         size_load = info['ncpu']
 
     for iout in tqdm(iout_list, desc=f"Exporting snapshot data", disable=True):
-        
         # remove unnecessary fields per perticle type
         if converted_dtypes_part is None and convert_part:
             converted_dtypes_part = {}
@@ -398,12 +425,12 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
         # Start exporting cell and particle data for each snapshot
         if convert_part and converted_dtypes_part is not None:
             timer.start(f"Starting particle data extraction for iout = {iout}.", name='part_hdf')
-            create_hdf5_part(path, iout, n_chunk=n_chunk, size_load=size_load, converted_dtypes=converted_dtypes_part, output_path=output_path, cpu_list=cpu_list, dataset_kw=dataset_kw, overwrite=overwrite, sim_description=sim_description, sim_publication=sim_publication, version=version, nthread=nthread, update_attributes=update_attributes)
+            create_hdf5_part(path, iout, n_chunk=n_chunk, size_load=size_load, converted_dtypes=converted_dtypes_part, output_path=output_path, cpu_list=cpu_list, dataset_kw=dataset_kw, overwrite=overwrite, sim_description=sim_description, sim_publication=sim_publication, version=version, nthread=nthread, update_attributes=update_attributes, no_input=no_input)
             timer.record(f"Particle data extraction completed for iout = {iout}.", name='part_hdf')
         
         if convert_cell and converted_dtypes_cell is not None:
             timer.start(f"Starting cell data extraction for iout = {iout}.", name='cell_hdf')
-            create_hdf5_cell(path, iout, n_chunk=n_chunk, size_load=size_load, converted_dtypes=converted_dtypes_cell['cell'], output_path=output_path, cpu_list=cpu_list, dataset_kw=dataset_kw, overwrite=overwrite, sim_description=sim_description, sim_publication=sim_publication, version=version, nthread=nthread, update_attributes=update_attributes)
+            create_hdf5_cell(path, iout, n_chunk=n_chunk, size_load=size_load, converted_dtypes=converted_dtypes_cell['cell'], output_path=output_path, cpu_list=cpu_list, dataset_kw=dataset_kw, overwrite=overwrite, sim_description=sim_description, sim_publication=sim_publication, version=version, nthread=nthread, update_attributes=update_attributes, no_input=no_input)
             timer.record(f"Cell data extraction completed for iout = {iout}.", name='cell_hdf')
 
         if walltime is not None:
@@ -650,7 +677,7 @@ def main():
     print("Check config (*.toml) file to set options if needed. (Usage example: amr2hdf -c config.toml)")
     parser.add_argument("--repo", "-r", help='Repository path', type=str, default='.')
     parser.add_argument("--imin", "-i", help='Minimum output index to process (default: 1)', type=int, default=1)
-    parser.add_argument("--imax", "-I", help='Maximum output index to process (default: 1)', type=int, default=1)
+    parser.add_argument("--imax", "-I", help='Maximum output index to process (default: 5000)', type=int, default=5000)
     parser.add_argument("--verbose", "-v", help='Enable verbose output', action='store_true')
     parser.add_argument("--version", "-vs", help='Version of the output files', type=str, default='1.1')
     parser.add_argument("--overwrite", "-o", help='Overwrite existing output files', action='store_true')
@@ -661,6 +688,10 @@ def main():
     parser.add_argument("--config", "-c", help='Path to configuration file (default: None)', type=str, default=None)
     parser.add_argument("--output", "-p", help='Relative output path (default: hdf)', type=str, default='hdf')
     parser.add_argument("--update-attributes", "-a", help='Update attributes in existing HDF5 files without rewriting data', action='store_true')
+    parser.add_argument("--no-input", help='Update HDF5 files based on the existing data', action='store_true')
+    parser.add_argument("--part", help="Convert particle data only", action='store_true')
+    parser.add_argument("--cell", help="Convert cell data only", action='store_true')
+    parser.add_argument("--iouts", help="List of output indices to process (default: None, which means all available outputs)", type=str, default=None)
 
     args = parser.parse_args()
 
@@ -675,6 +706,16 @@ def main():
 
         for key, value in config.items():
             setattr(args, key, value)
+    
+    if args.cell and not args.part:
+        convert_part = False
+        convert_cell = True
+    elif args.part and not args.cell:
+        convert_part = True
+        convert_cell = False
+    else:
+        convert_part = True
+        convert_cell = True
 
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print('-----------------------------------------------')
@@ -687,6 +728,15 @@ def main():
     dataset_kw = args.dataset_kw if hasattr(args, 'dataset_kw') else {}
 
     iout_list = np.arange(args.imin, args.imax + 1)
+
+    iout_input = args.iouts.split(',') if args.iouts is not None else None
+    if iout_input is not None:
+        iout_input = np.array([int(i) for i in iout_input], dtype=int)
+        iout_list = iout_list[np.isin(iout_list, iout_input)]
+        if len(iout_list) == 0:
+            timer.message(f"No valid iout found in the specified range and list. Exiting.")
+            return
+
     repo_path = args.repo
     overwrite = args.overwrite
     version = args.version
@@ -714,7 +764,9 @@ def main():
                      converted_dtypes_part=converted_dtypes_part, converted_dtypes_cell=converted_dtypes_cell,
                      output_path=relative_output_path, cpu_list=cpu_list, dataset_kw=dataset_kw,
                      sim_description=sim_description, sim_publication=sim_publication,
-                     version=version, overwrite=overwrite, nthread=nthread, walltime=args.walltime, update_attributes=args.update_attributes)
+                     convert_cell=convert_cell, convert_part=convert_part,
+                     version=version, overwrite=overwrite, nthread=nthread, walltime=args.walltime,
+                     update_attributes=args.update_attributes, no_input=args.no_input)
 
 
     timer.record("Script completed successfully.", name='main')
