@@ -1262,8 +1262,8 @@ def read_sinkprops(
     # output dtype
     dtype_out = np.dtype([(get_vname('icoarse'), np.int32), (get_vname('aexp'), np.float64), (get_vname('unit_l'), np.float64), (get_vname('unit_d'), np.float64), (get_vname('unit_t'), np.float64)] + dtype.descr)
 
-    size_byte = len(icoarse_read) * dtype_out.itemsize
-    timer.message(f"Found {len(icoarse_read)} sink property files to read ({format_bytes(size_byte)}).")
+    size = np.sum([os.path.getsize(os.path.join(path, config['FILENAME_FORMAT_SINKPROPS'].format(icoarse=icoarse))) for icoarse in icoarse_read])
+    timer.message(f"Found {len(icoarse_read)} sink property files to read ({format_bytes(size)}).")
 
     if len(icoarse_read) == 0:
         return np.empty(0, dtype=dtype_out)
