@@ -1,10 +1,13 @@
 import os
 import pickle as pkl
 
-from . import config, get_vname, timer, format_bytes
+from . import get_config, get_vname, timer, format_bytes
+from . import ramses
 from .utils.fortranfile import FortranFile
 import numpy as np
 from typing import Sequence
+
+config = get_config()
 
 def _get_halomaker_struct(galaxy=False, double_precision=True, nbin:int=10):
     """
@@ -60,6 +63,42 @@ def _read_halo(f:FortranFile, data, struct, vname_set='native'):
                 data[name] = value
 
 
+def _read_halo_fast(f:FortranFile, data, struct, vname_set='native'):
+    timer.message("Reading halo data...", 3)
+    for item in struct[:2]:
+        if item is None:
+            f.skip_records(1)
+        else:
+            read = f.read_record('b')
+            names, dtype, *shape = item
+            if not isinstance(names, list):
+                names = [names]
+            names = [get_vname(name, vname_set) for name in names]
+            read = np.array(read).view(dtype)
+            if len(shape) > 0:
+                read = read.reshape((-1, *shape))
+            for name, value in zip(names, read):
+                data[name] = value
+
+    dtype_read = []
+    for item in struct[2:]:
+        names, dtype = item
+        if not isinstance(names, list):
+            names = [names]
+        
+        dtype_read.append((dtype, (len(names),)))
+    
+    read = f.read_sequence(*dtype_read)
+
+    for item, record in zip(struct[2:], read):
+        names, dtype = item
+        if not isinstance(names, list):
+            names = [names]
+        names = [get_vname(name, vname_set) for name in names]        
+        for name, value in zip(names, record):
+            data[name] = value
+
+
 def read_halomaker(
         path: str,
         iout:int | None=None,
@@ -95,13 +134,13 @@ def read_halomaker(
         else:
             path = os.path.join(path, config['FILENAME_FORMAT_HALOMAKER'].format(iout=iout))
     
-    timer.start(f"Reading halo data from {path} at iout={iout}...")
+    timer.start(f"Reading halo data from {path}")
 
     if not os.path.exists(path):
         if error_on_missing:
             raise FileNotFoundError(f"File {path} not found.")
         else:
-            timer.record(f"File {path} not found. Skipping reading halo data at iout={iout}.")
+            timer.record(f"File {path} not found. Skipping reading halo data.")
             nbin = 10
             nhalo_snap = 0
     else:
@@ -143,7 +182,7 @@ def read_halomaker(
         f = FortranFile(path, 'r')
         f.skip_records(6)
         for i in range(nhalo_snap):
-            _read_halo(f, data[i], struct, vname_set=vname_set)
+            _read_halo_fast(f, data[i], struct, vname_set=vname_set)
         f.close()
 
     size_byte = data.nbytes
@@ -234,6 +273,19 @@ def read_halomaker_members(
     timer.record(f"Found {nparts_out} members for {num_target} halos in total.")
 
     return members if not return_nparts else (members, nparts_arr)
+
+
+def write_inputfiles_halomaker(output_path, input_path, iout_list=None, data_type='Ra4', n_workers=1):
+    if iout_list is None:
+        iout_list = ramses.check_snapshots(input_path)
+    string = ""
+    for iout in iout_list:
+        file_path = os.path.join(input_path, config['OUTPUT_FORMAT'].format(iout=iout))
+        string += f"{file_path} {data_type} {n_workers} {iout:05d}\n"
+    output_path = os.path.join(output_path, 'inputfiles_HaloMaker.dat')
+    with open(output_path, 'w') as f:
+        f.write(string)
+    timer.record(f"Written HaloMaker input file list to {output_path}.")
 
 
 def read_ptree(path: str, iout:int | None=None):

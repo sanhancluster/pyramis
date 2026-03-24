@@ -260,6 +260,33 @@ class FortranFile(object):
             return data[0]
         else:
             return tuple(data)
+    
+    def read_sequence(self, *dtypes, **kwargs):
+        """
+        Reads a sequence of records of given types from the file
+        """
+        dtype = kwargs.pop('dtype', None)
+        if kwargs:
+            raise ValueError("Unknown keyword arguments {}".format(tuple(kwargs.keys())))
+
+        if dtype is not None:
+            dtypes = dtypes + (dtype,)
+        elif not dtypes:
+            raise ValueError('Must specify at least one dtype')
+        header_size = self._header_dtype.itemsize
+        size_bytes = [np.dtype(dtype).itemsize + header_size * 2 for dtype in dtypes]
+        records = np.fromfile(self._fp, dtype='b', count=sum(size_bytes))
+
+        marker = 0
+        data = []
+        for record_size, dtype in zip(size_bytes, dtypes):
+            start, end = marker+header_size, marker+record_size-header_size
+            record = np.frombuffer(records[start:end], dtype=dtype)[0]
+            data.append(record)
+            marker += record_size
+
+        return data
+
 
     def skip_records(self, skip_num=1, legacy=False):
         """
@@ -334,7 +361,7 @@ class FortranFile(object):
         """
         Reads and returns 2d array data from file
 
-        :param read_num: number of repeated fortran records with same siae
+        :param read_num: number of repeated fortran records with same size
         :return: 2d array
         """
         array = []
