@@ -23,8 +23,39 @@ class Region():
     __call__ = evaluate
 
 
+class UnionRegion(Region):
+    def __init__(self, regions):
+        self.regions = regions
+
+    def contains(self, points, size=0.0):
+        mask = np.zeros(len(points), dtype=bool)
+        for region in self.regions:
+            mask |= region.contains(points, size=size)
+        return mask
+    
+    def contains_data(self, data, cell: bool=False, boxlen: float=1.0):
+        mask = np.zeros(len(data), dtype=bool)
+        for region in self.regions:
+            mask |= region.contains_data(data, cell=cell, boxlen=boxlen)
+        return mask
+
+    @property
+    def bounding_box(self) -> "Box":
+        point_min = [np.inf, np.inf, np.inf]
+        point_max = [-np.inf, -np.inf, -np.inf]
+        for region in self.regions:
+            point_min = np.minimum(point_min, region.bounding_box.box[:, 0])
+            point_max = np.maximum(point_max, region.bounding_box.box[:, 1])
+        return Box(np.stack([point_min, point_max], axis=-1))
+
+
 class Box(Region):
-    def __init__(self, box):
+    def __init__(self, box=None, center=None, extent=None):
+        if box is None:
+            if center is not None and extent is not None:
+                self.set_center(center, extent)
+            else:
+                box = [[0, 1], [0, 1], [0, 1]]
         self.box = np.asarray(box)
 
     def set_center(self, center, extent=None):
