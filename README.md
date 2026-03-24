@@ -43,9 +43,12 @@ pyramis uses multi-threading (concurrent.futures.ThreadPoolExecutor) by default 
 You can read particle data directly from specific region by following commands. Pyramis computes list of cpu domains to read the complete data witin the region using Peano-Hilbert space filling curve.
 ```python
 import pyramis as pr
+
 ramses_path = '/path/to/ramses/' # path to the directory where output_* are located
 region = [[0.4, 0.6], [0.4, 0.6], [0.4, 0.6]] # targeting box in code unit
+
 part = pr.ramses.read_part(ramses_path, iout=1, region=region) # reads output_00001
+
 print(f"Total particle mass within the box is {np.sum(part['m'])}") # in code unit
 ```
 For a particular type of particles, ```part_type``` option can be used.
@@ -58,7 +61,9 @@ You can read all cells from specific region by following commands.
 ```python
 ramses_path = '/path/to/ramses/' # path to the directory where output_* are located
 region = [[0.4, 0.6], [0.4, 0.6], [0.4, 0.6]] # targeting box in code unit
+
 cell = pr.ramses.read_cell(ramses_path, iout=1, region=region)
+
 print(f"Mean gas density within the box is {np.mean(cell['rho'])}") # in code unit
 ```
 
@@ -70,6 +75,7 @@ pyramis uses concurrent.futures.ProcessPoolExecutor by default to enable paralle
 if __name__ == '__main__':
     hdf_path = '/path/to/hdf/' # path to the directory where part_*.h5, cell_*.h5 are located
     region = [[0.4, 0.6], [0.4, 0.6], [0.4, 0.6]] # targeting box in code unit
+
     part = pr.hdf.read_part(hdf_path, part_type='star', iout=1, region=region)
     cell = pr.hdf.read_cell(hdf_path, iout=1, region=region)
 ```
@@ -78,6 +84,7 @@ Particle type (```part_type```) need to be always present for reading particle d
 ### Reading Dyablo cell data
 ```python
 dyablo_path = '/path/to/dyablo/'
+
 pr.dyablo.read_cell(dyablo_path, istep=0)
 ```
 
@@ -86,6 +93,7 @@ pr.dyablo.read_cell(dyablo_path, istep=0)
 #### DM Halo and Galaxy Catalog
 ```python
 halomaker_path = '/path/to/halos/' # path the directory where tree_bricks* are located
+
 halo = pr.halo_finder.read_halomaker(halomaker_path, iout=1)
 galaxy = pr.halo_finder.read_halomaker(galaxymaker_path, iout=1, galaxy=True)
 ```
