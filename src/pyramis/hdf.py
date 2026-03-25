@@ -52,7 +52,7 @@ def check_snapshots(path: str, check_data=['cell', 'part'], check_info=['aexp', 
     if iout_list is None:
         iout_list = np.array([])
     
-    if 'scheduled' in check_info:
+    if 'scheduled' in check_info and 'icoarse' not in check_info:
         check_info += ['icoarse']
     
     info_list = [[] for _ in check_info]
