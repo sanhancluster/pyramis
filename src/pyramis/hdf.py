@@ -22,7 +22,7 @@ from multiprocessing.shared_memory import SharedMemory
 config = get_config()
 
 
-def check_snapshots(path: str, check_data=['cell', 'part'], check_info=True, report_missing=False, scale_threshold=50.) -> np.ndarray:
+def check_snapshots(path: str, check_data=['cell', 'part'], check_info=['aexp', 'age', 'time', 'icoarse', 'scheduled'], report_missing=False, scale_threshold=50.) -> np.ndarray:
     timer.start(f"Checking HDF snapshots at {path} for {check_data}...")
     iout_list = None
     if isinstance(check_data, str):
@@ -52,10 +52,13 @@ def check_snapshots(path: str, check_data=['cell', 'part'], check_info=True, rep
     if iout_list is None:
         iout_list = np.array([])
     
-    aexp_list, age_list, time_list, nstep_coarse_list = [], [], [], []
+    if 'scheduled' in check_info:
+        check_info += ['icoarse']
+    
+    info_list = [[] for _ in check_info]
     iout_list_new = []
     aout, tout = None, None
-    if check_info:
+    if len(check_info) > 0:
         for iout in iout_list:
             try:
                 info = get_info(path, iout, cosmo=False, check_data=check_data)
@@ -63,33 +66,36 @@ def check_snapshots(path: str, check_data=['cell', 'part'], check_info=True, rep
                 timer.message(f"Skipping file for iout={iout}, which is currently locked.")
                 continue
             iout_list_new.append(iout)
-            aexp_list.append(info.get('aexp', 1.0))
-            age_list.append(info.get('age', 0.0))
-            time_list.append(info.get('time', 0.0))
-            nstep_coarse_list.append(info.get('icoarse', 0))
+            for idx, key in enumerate(check_info):
+                if key == 'scheduled':
+                    info_list[idx].append(False)
+                else:
+                    info_list[idx].append(info.get(key))
             aout = info.get('aout', aout)
             tout = info.get('tout', tout)
-
+        info_list = [np.array(lst) for lst in info_list]
+        
         table = np.rec.fromarrays(
-            [iout_list_new, aexp_list, age_list, time_list, nstep_coarse_list, np.zeros(len(iout_list_new), dtype=bool)],
-            dtype=[('iout', 'i4'), ('aexp', 'f8'), ('age', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4'), ('scheduled', '?')])
+            [iout_list_new, *info_list],
+            dtype=[('iout', 'i4'), *[(key, info_list[idx].dtype) for idx, key in enumerate(check_info)]])
     else:
         table = np.rec.fromarrays(
             [iout_list], dtype=[('iout', 'i4')])
     table = np.sort(table, order='iout')
 
-    scheduled = np.zeros(len(table), dtype=bool)
-    scheduled[table['iout'] == 1] = True # always include the first snapshot
+    if 'scheduled' in check_info:
+        scheduled = np.zeros(len(table), dtype=bool)
+        scheduled[table['iout'] == 1] = True # always include the first snapshot
 
-    if aout is not None and len(aout) > 0 and not np.all(aout == 0.0):
-        a_thr = table['aexp'] / table['nstep_coarse'] * scale_threshold
-        scheduled |= scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
+        if 'aexp' in check_info and aout is not None and len(aout) > 0 and not np.all(aout == 0.0):
+            a_thr = table['aexp'] / table['icoarse'] * scale_threshold
+            scheduled |= scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
 
-    if tout is not None and len(tout) > 0 and not np.all(tout == 0.0):
-        t_thr = table['time'] / table['nstep_coarse'] * scale_threshold
-        scheduled |= scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
+        if 'time' in check_info and tout is not None and len(tout) > 0 and not np.all(tout == 0.0):
+            t_thr = table['time'] / table['icoarse'] * scale_threshold
+            scheduled |= scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
 
-    table['scheduled'] = scheduled
+        table['scheduled'] = scheduled
 
     timer.record(f"Found {table.size} snapshots in {path} with data {check_data}.")
     return table
