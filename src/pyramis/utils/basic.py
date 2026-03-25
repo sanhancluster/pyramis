@@ -1,4 +1,4 @@
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from .. import config
 from ..config_module import _init_worker_config
 import multiprocessing as mp
@@ -38,6 +38,26 @@ def get_mp_executor(backend: str="thread", n_workers: int | None=None, method: s
         executor_kwargs['initializer'] = _init_worker_config
         executor_kwargs['initargs'] = (config.copy(),)
     return Executor(**executor_kwargs)
+
+
+def run_mp_executor(func, args_list, backend: str="thread", n_workers: int | None=None, method: str | None=None, mp_method='map', chunksize=1):
+    with get_mp_executor(backend=backend, n_workers=n_workers, method=method) as executor:
+        if mp_method == 'map':
+            results = list(executor.map(func, *zip(*args_list), chunksize=chunksize))
+        elif mp_method == 'submit':
+            futures = [executor.submit(func, *args) for args in args_list]
+
+            for fut in as_completed(futures):
+                exc = fut.exception()
+                if exc is not None:
+                    # Raise the first error encountered
+                    raise exc
+
+            results = [future.result() for future in futures]
+
+        else:
+            raise ValueError(f"Unsupported mp_method: {mp_method}")
+    return results
 
 
 CYAN = "\033[36m"

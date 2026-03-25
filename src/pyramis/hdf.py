@@ -4,14 +4,13 @@ import numpy as np
 import glob
 from typing import Sequence
 
-from concurrent.futures import as_completed
 import warnings
 
 from . import get_config, get_dim_keys, get_vname, get_mapping, cgs_unit, timer
 from .core import compute_chunk_list_from_hilbert
 from .geometry import Region, Box
 from .utils.arrayview import SharedView
-from .utils import get_mp_executor
+from .utils import run_mp_executor
 from. import ramses
 from .astro import get_cosmo_table, cosmo_convert
 from . import ANY
@@ -254,20 +253,10 @@ def _chunk_slice_hdf_mp(
     if region is not None:
         # Compute exact sizes by filtering with region in parallel
         jobs = [
-            (path, group_name, int(start), int(end), region, is_cell)
+            ((path, group_name, int(start), int(end), region, is_cell),)
             for start, end in zip(starts, ends)
         ]
-        with get_mp_executor(backend=mp_backend, n_workers=n_workers) as executor:
-            futures = [executor.submit(_chunk_size_worker, args) for args in jobs]
-
-            # Gather sizes
-            for fut in as_completed(futures):
-                exc = fut.exception()
-                if exc is not None:
-                    # Raise the first error encountered
-                    raise exc
-        # Reorder sizes to match chunk order
-        ndata_per_chunk = np.array([fut.result() for fut in futures])
+        ndata_per_chunk = np.array(run_mp_executor(_chunk_size_worker, jobs, backend=mp_backend, n_workers=n_workers, mp_method='submit'))
     else:
         ndata_per_chunk = ends - starts
     ndata_tot = int(np.sum(ndata_per_chunk))
@@ -291,24 +280,16 @@ def _chunk_slice_hdf_mp(
 
             # Prepare worker job arguments
             jobs = [
-                (path, group_name, target_fields, shm.name, None, ndata_tot, dtype_out, int(start), int(end), int(offset), int(ndata), region, is_cell)
+                ((path, group_name, target_fields, shm.name, None, ndata_tot, dtype_out, int(start), int(end), int(offset), int(ndata), region, is_cell),)
                 for start, end, offset, ndata in zip(starts, ends, offsets, ndata_per_chunk)
                 if ndata > 0]
 
-            with get_mp_executor(backend=mp_backend, n_workers=n_workers) as executor:
-                futures = [executor.submit(_load_slice_worker, args) for args in jobs]
-
-                # Propagate the first exception (if any)
-                for fut in as_completed(futures):
-                    exc = fut.exception()
-                    if exc is not None:
-                        # Raise the first error encountered
-                        raise exc
+            run_mp_executor(_load_slice_worker, jobs, backend=mp_backend, n_workers=n_workers, mp_method='submit')
 
             if copy_result:
                 result = np.array(shared_arr, copy=True)
             else:
-                result = SharedView(shm, (ndata_tot,), dtype)
+                result = SharedView(shm, (ndata_tot,), dtype_out)
                 
         finally:
             if copy_result:
@@ -323,18 +304,11 @@ def _chunk_slice_hdf_mp(
     else:
         shared_arr = np.empty((ndata_tot,), dtype=dtype_out)
         jobs = [
-            (path, group_name, target_fields, None, shared_arr, ndata_tot, dtype_out, int(start), int(end), int(offset), int(size), region, is_cell)
+            ((path, group_name, target_fields, None, shared_arr, ndata_tot, dtype_out, int(start), int(end), int(offset), int(size), region, is_cell),)
             for start, end, offset, size in zip(starts, ends, offsets, ndata_per_chunk)
             if size > 0]
-        with get_mp_executor(backend=mp_backend, n_workers=n_workers) as executor:
-            futures = [executor.submit(_load_slice_worker, args) for args in jobs]
-
-            # Propagate the first exception (if any)
-            for fut in as_completed(futures):
-                exc = fut.exception()
-                if exc is not None:
-                    # Raise the first error encountered
-                    raise exc
+        
+        run_mp_executor(_load_slice_worker, jobs, backend=mp_backend, n_workers=n_workers, mp_method='submit')
         result = shared_arr        
 
     return result
