@@ -22,8 +22,6 @@ import h5py
 from multiprocessing.shared_memory import SharedMemory
 from itertools import repeat
 
-config = get_config()
-
 def scheduled_snapshots(tout, time, t_thr, iout=None, report_missing=False):
     tout = np.unique(tout)
     tout = np.sort(tout)
@@ -57,6 +55,8 @@ def scheduled_snapshots(tout, time, t_thr, iout=None, report_missing=False):
 
 
 def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], iout_min=None, iout_max=None, report_missing=False, namelist_path=None, scale_threshold=50.) -> np.ndarray:
+    config = get_config()
+
     timer.start(f'Checking snapshots in {path} for {check_data}...')
     pattern = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=ANY))
     dirs = glob.glob(pattern)
@@ -133,6 +133,7 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], iout_min=Non
 
 
 def read_type_descriptor(path: str, iout: int, data: str='part') -> np.dtype:
+    config = get_config()
     timer.message(f"Reading type descriptor for {data} at iout={iout} from {path}...", 2)
     fd_path = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILE_DESCRIPTOR_FORMAT'].format(data=data))
     if not os.path.exists(fd_path):
@@ -203,6 +204,7 @@ def parse_namelist(filename):
 
 
 def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None, read_amr=True, read_hydro=True) -> dict:
+    config = get_config()
     info_path = os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), f'info_{iout:05d}.txt')
     timer.message(f"Getting info for iout={iout} from {output_path}...", 2)
     info = parse_info(info_path)
@@ -306,21 +308,21 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
 
 
 def get_data_path(data_name, path, iout, icpu):
+    config = get_config()
     return os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES'].format(data=data_name, iout=iout, icpu=icpu))
 
-def _read_npart_file(path, iout, icpu, part_type, family_exists, is_star):
+def _read_npart_file(path, iout, icpu, part_type, family_exists):
     filename = get_data_path('part', path, iout, icpu)
     with FortranFile(f"{filename}", mode='r') as f:
-        # Option 1: read nstar if part_type is 'star'
         f.skip_records(2)
         npart, = f.read_ints('i4')
         
-        # Option 2: if part_type is None, just sum npart
+        # Option 1: if part_type is None, just sum npart
         if part_type is None:
             return npart
         f.skip_records(5)
 
-        # Option 3: read family/epoch and classify
+        # Option 2: read family/epoch and classify
         if family_exists:
             # Family-based classification
             data = np.empty(npart, dtype=[('family', np.int8)])
@@ -338,6 +340,7 @@ def _read_npart_file(path, iout, icpu, part_type, family_exists, is_star):
 
 
 def read_npart_header(path, iout):
+    config = get_config()
     filename = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), f'header_{iout:05d}.txt')
     family_counts = {}
 
@@ -375,12 +378,11 @@ def read_npart_per_cpu(path, iout, cpulist=None, dtype_read=None, part_type=None
     if dtype_read is None:
         dtype_read = read_type_descriptor(path, iout, 'part')
     family_exists = dtype_read.names is not None and 'family' in dtype_read.names
-    is_star = part_type == 'star'
 
     npart_cpu = []
     if n_workers in (None, 1):
         for icpu in cpulist:
-            npart_cpu.append(_read_npart_file(path, iout, icpu, part_type, family_exists, is_star))
+            npart_cpu.append(_read_npart_file(path, iout, icpu, part_type, family_exists))
         return np.array(npart_cpu)
     
     else:
@@ -393,13 +395,13 @@ def read_npart_per_cpu(path, iout, cpulist=None, dtype_read=None, part_type=None
                     cpulist,
                     repeat(part_type),
                     repeat(family_exists),
-                    repeat(is_star),
                 )
             )
         return np.array(results)
 
 
 def mask_by_part_type(part, part_type):
+    config = get_config()
     names = part.dtype.names
     if ('family' in names):
         # Do a family-based classification
@@ -444,7 +446,7 @@ def read_part(
     info: dict | None = None,
     read_cpu=False,
     exact_cut: Literal[False] = False,
-    n_workers: int=config['DEFAULT_N_PROCS'],
+    n_workers: int | None=None,
     use_process: Literal[True] = True,
     copy_result: Literal[False] = False) -> SharedView: ...
 
@@ -460,7 +462,7 @@ def read_part(
     info: dict | None = None,
     read_cpu=False,
     exact_cut: bool=True,
-    n_workers: int=config['DEFAULT_N_PROCS'],
+    n_workers: int | None=None,
     use_process: bool = False,
     copy_result: bool = True) -> np.ndarray: ...
 
@@ -475,11 +477,15 @@ def read_part(
         info: dict | None = None,
         read_cpu=False,
         exact_cut: bool=True,
-        n_workers: int=config['DEFAULT_N_PROCS'],
+        n_workers: int | None=None,
         use_process: bool=False,
         copy_result: bool=True) -> np.ndarray | SharedView:
 
+    config = get_config()
     timer.start(f"Reading particle data from {path} at iout={iout}...")
+
+    if n_workers is None:
+        n_workers = config['DEFAULT_N_PROCS']
 
     if isinstance(region, np.ndarray) or isinstance(region, list):
         region = Box(region)
@@ -608,7 +614,7 @@ def _read_with_format(f, data, dtype_read):
 
 
 def _load_part_file(icpu, output_arr, path, iout, dtype_read, part_type=None):
-
+    config = get_config()
     dtype_out = output_arr.dtype
     filename = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout), config['FILENAME_FORMAT_RAMSES'].format(data='part', iout=iout, icpu=icpu))
 
@@ -635,6 +641,7 @@ def _load_part_file(icpu, output_arr, path, iout, dtype_read, part_type=None):
 
 
 def read_ncell_per_cpu(path, iout, cpulist=None, info=None, read_branch=False) -> np.ndarray:
+    config = get_config()
     timer.message(f"Reading number of cells per CPU for iout={iout} from {path}...", 2)
     if info is None:
         info = get_info(path, iout)
@@ -699,7 +706,7 @@ def read_cell(
     read_cpu: bool = False,
     read_branch: bool = False,
     exact_cut: Literal[False] = False,
-    n_workers: int = config['DEFAULT_N_PROCS'],
+    n_workers: int | None = None,
     use_process: Literal[True] = True,
     copy_result: Literal[False] = False,
 ) -> SharedView: ...
@@ -718,7 +725,7 @@ def read_cell(
     read_cpu: bool = False,
     read_branch: bool = False,
     exact_cut: bool=True,
-    n_workers: int = config['DEFAULT_N_PROCS'],
+    n_workers: int | None = None,
     use_process: bool = False,
     copy_result: bool = True,
 ) -> np.ndarray: ...
@@ -736,10 +743,11 @@ def read_cell(
         read_cpu=False,
         read_branch=False,
         exact_cut: bool=True,
-        n_workers: int=config['DEFAULT_N_PROCS'],
+        n_workers: int | None = None,
         use_process: bool=False,
         copy_result: bool=True) -> np.ndarray | SharedView:
 
+    config = get_config()
     timer.start(f"Reading cell data from {path} at iout={iout}...")
 
     if isinstance(region, np.ndarray) or isinstance(region, list):
@@ -747,6 +755,9 @@ def read_cell(
 
     if info is None:
         info = get_info(path, iout)
+
+    if n_workers is None:
+        n_workers = config['DEFAULT_N_PROCS']
 
     if use_process:
         mp_backend = "process"
@@ -840,6 +851,7 @@ def read_cell(
     return result
 
 def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, read_grav=False, read_branch=False, info=None):
+    config = get_config()
     OCT_OFFSET = np.array([
         [-0.5, -0.5, -0.5],
         [ 0.5, -0.5, -0.5],
@@ -1150,6 +1162,7 @@ def read_sink(
         info: dict | None = None,
         exact_cut: bool=True) -> np.ndarray:
 
+    config = get_config()
     timer.start(f"Reading sink data from {path} at iout={iout}...")
 
     if isinstance(region, np.ndarray) or isinstance(region, list):
@@ -1202,6 +1215,7 @@ def read_sink(
 
 # Functions for reading sink properties
 def _load_sinkprops_file(icoarse, output_arr, path, dtype_read):
+    config = get_config()
     filename = os.path.join(path, config['FILENAME_FORMAT_SINKPROPS'].format(icoarse=icoarse))
     with FortranFile(filename, mode='r') as f:
         f.skip_records(2)
@@ -1218,6 +1232,7 @@ def _load_sinkprops_file(icoarse, output_arr, path, dtype_read):
 
 
 def read_nsinkprops_per_file(path: str, icoarse_read: Sequence[int] | np.ndarray) -> np.ndarray:
+    config = get_config()
     nsink_per_file = []
     for icoarse in icoarse_read:
         filename = os.path.join(path, config['FILENAME_FORMAT_SINKPROPS'].format(icoarse=icoarse))
@@ -1232,11 +1247,15 @@ def read_sinkprops(
         icoarse_min: int | None = None,
         icoarse_max: int | None = None,
         dtype: np.dtype | list | None = None,
-        n_workers: int = config['DEFAULT_N_PROCS'],
+        n_workers: int | None = None,
         use_process: bool = True,
         copy_result: bool = True):
-    
+
+    config = get_config()    
     timer.record(f"Reading sink properties from {path}...")
+
+    if n_workers is None:
+        n_workers = config['DEFAULT_N_PROCS']
     
     if use_process:
         mp_backend = "process"

@@ -1,9 +1,10 @@
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
-from .. import config
 from ..config_module import _init_worker_config
+from .. import get_config
 import multiprocessing as mp
 import time
 import sys
+import copy
 
 def in_jupyter() -> bool:
     try:
@@ -26,17 +27,20 @@ def get_mp_context(method=None):
 
 
 def get_mp_executor(backend: str="thread", n_workers: int | None=None, method: str | None=None):
+    cfg = get_config()
     if n_workers is None:
-        n_workers = config['DEFAULT_N_PROCS']
+        n_workers = cfg['DEFAULT_N_PROCS']
 
     ctx = get_mp_context(method)
 
     Executor = ProcessPoolExecutor if backend == "process" else ThreadPoolExecutor
     executor_kwargs: dict = {'max_workers': n_workers}
+
+    # For process-based executor, we need to set the initializer to initialize the config in each worker process
     if backend == "process":
         executor_kwargs['mp_context'] = ctx
         executor_kwargs['initializer'] = _init_worker_config
-        executor_kwargs['initargs'] = (config.copy(),)
+        executor_kwargs['initargs'] = (copy.deepcopy(cfg),)
     return Executor(**executor_kwargs)
 
 

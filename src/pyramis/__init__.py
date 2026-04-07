@@ -10,9 +10,6 @@ config = get_config()
 cgs_unit = SimpleNamespace(**config['CGS_UNIT'])
 cgs_constants = SimpleNamespace(**config['CGS_CONSTANTS'])
 
-if config['DEFAULT_N_PROCS'] == 'auto':
-    config['DEFAULT_N_PROCS'] = len(os.sched_getaffinity(0))
-
 
 from .basic import *
 from . import utils

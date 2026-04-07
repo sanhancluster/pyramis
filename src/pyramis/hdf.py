@@ -18,10 +18,9 @@ from .ramses import scheduled_snapshots
 
 from multiprocessing.shared_memory import SharedMemory
 
-config = get_config()
-
 
 def check_snapshots(path: str, check_data=['cell', 'part'], check_info=['aexp', 'age', 'time', 'icoarse', 'scheduled'], report_missing=False, scale_threshold=50.) -> np.ndarray:
+    config = get_config()
     timer.start(f"Checking HDF snapshots at {path} for {check_data}...")
     iout_list = None
     if isinstance(check_data, str):
@@ -63,6 +62,9 @@ def check_snapshots(path: str, check_data=['cell', 'part'], check_info=['aexp', 
                 info = get_info(path, iout, cosmo=False, check_data=check_data)
             except BlockingIOError:
                 timer.message(f"Skipping file for iout={iout}, which is currently locked.")
+                continue
+            except OSError:
+                timer.message(f"Skipping file for iout={iout}, which cannot be read.")
                 continue
             iout_list_new.append(iout)
             for idx, key in enumerate(check_info):
@@ -121,6 +123,7 @@ def remap_dtype_names(dtype: np.dtype, mapping: dict | None=None) -> np.dtype:
     np.dtype
         New compound dtype with renamed fields.
     """
+    config = get_config()
     if mapping is None:
         mapping = config['VNAME_MAPPING'][config['VNAME_SET']]
     new_fields = []
@@ -236,6 +239,7 @@ def _chunk_slice_hdf_mp(
     is_cell=False,
     vname_set='native',
     use_vname_mapping=True):
+    config = get_config()
 
     if n_workers is None:
         n_workers = config['DEFAULT_N_PROCS']
@@ -382,7 +386,9 @@ def read_hdf(
         is_cell=False,
         vname_set=None,
         use_vname_mapping=True):
-    
+
+    config = get_config()
+
     timer.start(f"Reading HDF5 data from {filename} in group {name}...")
 
     if n_workers is None:
@@ -497,6 +503,8 @@ def read_part(
         Array of particle data.
     """
 
+    config = get_config()
+
     if vname_set is None:
         vname_set = config['VNAME_SET']
 
@@ -557,6 +565,8 @@ def read_cell(
     np.ndarray
         Array of cell data.
     """
+    
+    config = get_config()
 
     if vname_set is None:
         vname_set = config['VNAME_SET']
@@ -627,7 +637,8 @@ def read_sinkprops(
         target_fields=None,
         vname_set=None,
         use_vname_mapping=True):
-    
+
+    config = get_config()
     filename = os.path.join(path, filename)
     timer.start(f"Reading sink properties from {filename}...")
 
@@ -746,6 +757,9 @@ def get_info(path: str, iout: int, cosmo=True, cosmo_table=None, check_data=['ce
     cosmo_table : dict, optional
         Precomputed cosmology table. If None, it will be created from file attributes.
     """
+
+    config = get_config()
+
     filenames = [os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data=data, iout=iout)) for data in check_data]
     filenames = [fn for fn in filenames if os.path.exists(fn)]
     if len(filenames) == 0:
@@ -777,6 +791,7 @@ def get_info(path: str, iout: int, cosmo=True, cosmo_table=None, check_data=['ce
 
 
 def get_ndata(path, data, iout, data_type):
+    config = get_config()
     filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data=data, iout=iout))
     with h5py.File(filename, 'r') as f:
         if data_type in f.keys():
