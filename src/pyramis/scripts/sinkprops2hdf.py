@@ -7,6 +7,7 @@ from pyramis.utils import Timestamp
 import os
 
 pyr.set_config('VNAME_SET', 'native')
+timer = Timestamp()
 
 def export_hdf(repo: str, output_path='SINKPROPS/sinkprops.h5', h5py_kwargs=None):
     if h5py_kwargs is None:
@@ -82,7 +83,6 @@ def main():
     h5py_kwargs = dict(compression=args.compression, chunks=True, shuffle=True)
     print(f"Exporting sink properties from {args.repo} to {args.output} with compression={args.compression}...")
 
-    timer = Timestamp()
     timer.start("Exporting sink properties to HDF5", name='main')
     export_hdf(args.repo, output_path=args.output, h5py_kwargs=h5py_kwargs)
     timer.record("Finished exporting sink properties to HDF5", name='main')

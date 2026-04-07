@@ -11,11 +11,10 @@ from typing import Optional, Tuple
 
 from pyramis.utils import Timestamp, hilbert3d_map
 from pyramis.utils.arrayview import SharedView
-from pyramis import get_dim_keys, ramses, hdf
+from pyramis import get_dim_keys, ramses, hdf, set_config, get_config
 import tomllib
 
-ramses.config['VNAME_SET'] = 'native' # Recommended to use native variable names
-
+set_config('VNAME_SET', 'native')
 
 def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=False, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8, update_attributes=False, no_input=False):
     info = ramses.get_info(path, iout)
@@ -98,7 +97,8 @@ def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
                 # Add particle data to HDF5 file
                 add_group(fl, name, new_part,
                         levelmin=info['levelmin'], levelmax=info['levelmax'],
-                        n_chunk=n_chunk, n_level=n_level, part=True, dataset_kw=dataset_kw)
+                        n_chunk=n_chunk, n_level=n_level, part=True, dataset_kw=dataset_kw,
+                        no_input=no_input)
                 n_part_tot += new_part.size
             add_attr_with_descr(fl, 'size', n_part_tot, 'Total number of particles in the snapshot.')
 
@@ -270,7 +270,8 @@ def create_hdf5_cell(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
                 # Add cell data to HDF5 file
                 add_group(fl, name, new_cell,
                         levelmin=info['levelmin'], levelmax=info['levelmax'],
-                        n_chunk=n_chunk, n_level=n_level, part=False, dataset_kw=dataset_kw)
+                        n_chunk=n_chunk, n_level=n_level, part=False, dataset_kw=dataset_kw,
+                        no_input=no_input)
                 n_cell_tot += new_cell.size
             add_attr_with_descr(fl, 'size', n_cell_tot, 'Total number of cells in the snapshot.')
 
@@ -326,8 +327,8 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
     Export snapshots from the repository to HDF5 format.
     This function will export both particle and cell data.
     """
-
-    vname_abbr = ramses.config['VNAME_MAPPING'][ramses.config['VNAME_SET']]
+    config = get_config()
+    vname_abbr = config['VNAME_MAPPING'][config['VNAME_SET']]
     check_data = []
     if not (update_attributes or no_input):
         if convert_cell:
@@ -383,7 +384,7 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
                     new_dtype.append((key, new_fmt))
                 converted_dtypes_part[name] = new_dtype
             
-            if os.path.exists(ramses.config['FILENAME_FORMAT'].format(data='sink', iout=iout, icpu=1)):
+            if os.path.exists(config['FILENAME_FORMAT'].format(data='sink', iout=iout, icpu=1)):
                 dtype_sink = ramses.read_sink(path, iout).dtype
                 new_dtype = []
                 for desc in dtype_sink.descr:
@@ -485,6 +486,7 @@ def add_basic_attrs(fl: h5py.File, info: dict):
     """
     Add basic attributes to the HDF5 file.
     """
+    config = get_config()
 
     add_attr_with_descr(fl, 'iout', info.get('iout', 0), 'Output index of the snapshot.')
     add_attr_with_descr(fl, 'icoarse', info.get('nstep_coarse', 0), 'Number of coarse time steps of the snapshot.')
@@ -513,7 +515,7 @@ def add_basic_attrs(fl: h5py.File, info: dict):
     add_attr_with_descr(fl, 'unit_v', info['unit_l'] / info['unit_t'], 'Unit of velocity in cm/s.')
     add_attr_with_descr(fl, 'unit_p', info['unit_d'] * info['unit_l']**2 / info['unit_t']**2, 'Unit of pressure in g/(cm*s^2).')
 
-    add_attr_with_descr(fl, 'vname_set', ramses.config['VNAME_SET'], 'Variable name set used in the file.')
+    add_attr_with_descr(fl, 'vname_set', config['VNAME_SET'], 'Variable name set used in the file.')
     add_attr_with_descr(fl, 'aout', info.get('aout', []), 'List of scheduled output scale factors in the simulation.')
     add_attr_with_descr(fl, 'tout', info.get('tout', []), 'List of available output indices in the simulation.')
 
@@ -558,7 +560,7 @@ def write_dataset(group:h5py.Group, dataset_name:str, data:np.ndarray, sort_key=
         dset[:] = data
     return dset
 
-def add_group(fl:h5py.File, name:str, new_data:np.ndarray, levelmin:int, levelmax:int, n_chunk:int, n_level:int, part=False, sort=True, dataset_kw:dict={}):
+def add_group(fl:h5py.File, name:str, new_data:np.ndarray, levelmin:int, levelmax:int, n_chunk:int, n_level:int, part=False, sort=True, dataset_kw:dict={}, no_input=False):
     """
     Add a group to the HDF5 file with the specified name and data with chunks ordered by hilbert key and levels.
     """
@@ -602,8 +604,11 @@ def add_group(fl:h5py.File, name:str, new_data:np.ndarray, levelmin:int, levelma
     write_dataset(grp, 'chunk_boundary', data=chunk_boundary, **dataset_kw)
     if level_boundary is not None:
         write_dataset(grp, 'level_boundary', data=level_boundary, **dataset_kw)
-    timer.message(f"Writing {name} data with {new_data.size} components...")
-    write_dataset(grp, 'data', data=new_data, sort_key=sort_key, mem_block_bytes=1000 * 1024**2, **dataset_kw)
+    if not (no_input and np.all(sort_key[:-1] <= sort_key[1:])):
+        timer.message(f"Writing {name} data with {new_data.size} components...")
+        write_dataset(grp, 'data', data=new_data, sort_key=sort_key, mem_block_bytes=1000 * 1024**2, **dataset_kw)
+    else:
+        timer.message(f"Skipping writing {name} data since the input data is already sorted.")
 
     return grp
 
