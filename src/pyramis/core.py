@@ -40,12 +40,13 @@ def compute_chunk_list_from_hilbert(region: Union[Region, np.ndarray, list], hil
     """
     timer.message("Computing chunk list from Hilbert curve...", verbose_lim=2)
     if level_subdivide is None:
-        level_subdivide = config['DEFAULT_LEVEL_SUBDIVIDE']
+        level_subdivide = config.get('DEFAULT_LEVEL_SUBDIVIDE', 2)
+
     assert_ascending(hilbert_boundary)
     if isinstance(region, Region):
         bounding_box = region.bounding_box.box
     elif (isinstance(region, np.ndarray) or isinstance(region, list)) and np.shape(region) == (ndim, 2):
-        bounding_box = region
+        bounding_box = np.asarray(region)
         region = Box(bounding_box)
     else:
         raise ValueError("region must be either a Region instance or a (ndim, 2) ndarray representing a bounding box.")
@@ -70,6 +71,9 @@ def compute_chunk_list_from_hilbert(region: Union[Region, np.ndarray, list], hil
     )
     grid_points = np.stack([grid_x.ravel(), grid_y.ravel(), grid_z.ravel()], axis=-1)
 
+    if grid_points.shape[0] == 0:
+        return np.array([], dtype=np.int32)
+
     if not isinstance(region, Box):
         grid_points = grid_points[region.contains((grid_points + 0.5) * grid_size, size=grid_size/2)]
     hilbert_keys_min = hilbert3d(grid_points, bit_length=level_divide) * np.exp2(ndim * (level_hilbert - level_divide))
@@ -79,7 +83,7 @@ def compute_chunk_list_from_hilbert(region: Union[Region, np.ndarray, list], hil
 
     chunk_indices = np.unique(np.concatenate([np.arange(start, end + 1) for start, end in zip(chunk_indices_min, chunk_indices_max)]))
     timer.message(f"Found {len(chunk_indices)} chunks intersecting the region.", verbose_lim=3)
-    return np.sort(chunk_indices)
+    return np.sort(chunk_indices).astype(np.int32)
 
 
 def assert_ascending(arr, msg="Array is not sorted in ascending order."):
