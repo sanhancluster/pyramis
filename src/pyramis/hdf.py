@@ -429,6 +429,7 @@ def read_hdf(
                 hilbert_boundary=get_by_type(group, 'hilbert_boundary', h5py.Dataset)[:],
                 level_hilbert=group.attrs.get('levelmax', 1),
                 boxlen=group.parent.attrs.get('boxlen', 1.0),
+                n_workers=n_workers
             )
         else:
             nchunks = int(group.attrs.get('n_chunk', 0))

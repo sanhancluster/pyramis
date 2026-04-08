@@ -3,7 +3,7 @@ import numpy as np
 
 from .geometry import Box, Region
 from .utils import hilbert3d
-from . import config, timer
+from . import get_config, timer
 
 def domain_slice(data, domain_list, bounds):
     """
@@ -19,7 +19,15 @@ def domain_slice(data, domain_list, bounds):
     return merged
 
 
-def compute_chunk_list_from_hilbert(region: Union[Region, np.ndarray, list], hilbert_boundary, level_hilbert, boxlen: float=1.0, level_divide=None, level_subdivide: int | None=None, ndim: int=3) -> np.ndarray:
+def compute_chunk_list_from_hilbert(
+        region: Union[Region, np.ndarray, list],
+        hilbert_boundary,
+        level_hilbert,
+        boxlen: float=1.0,
+        level_divide=None,
+        level_subdivide: int | None=None,
+        ndim: int=3,
+        n_workers: int | None=None) -> np.ndarray:
     """
     Computes the list of chunk indices that intersect with the given region based on 3-dimensional Hilbert curve partitioning.
 
@@ -31,16 +39,21 @@ def compute_chunk_list_from_hilbert(region: Union[Region, np.ndarray, list], hil
         Array of Hilbert boundary keys defining the chunk partitions.
     level_hilbert : int
         The Hilbert curve level used for partitioning.
-    boxsize : float
+    boxlen : float
         The size of the entire box in which the Hilbert curve is defined.
     level_divide : int, optional
         The level at which to divide the Hilbert curve for chunking. If None, it is computed based on the region size.
     level_subdivide : int | None, optional
         Additional subdivision level to refine the chunking. If None, the default value from the config is used.
+    n_workers : int | None, optional
+        The number of workers to use for parallel computation. If None, the default value from the config is used.
     """
     timer.message("Computing chunk list from Hilbert curve...", verbose_lim=2)
+    config = get_config()
     if level_subdivide is None:
-        level_subdivide = config.get('DEFAULT_LEVEL_SUBDIVIDE', 2)
+        level_subdivide = int(config.get('DEFAULT_LEVEL_SUBDIVIDE', 2))
+    if n_workers is None:
+        n_workers = int(config.get('DEFAULT_N_WORKERS', 4))
 
     assert_ascending(hilbert_boundary)
     if isinstance(region, Region):
@@ -76,8 +89,8 @@ def compute_chunk_list_from_hilbert(region: Union[Region, np.ndarray, list], hil
 
     if not isinstance(region, Box):
         grid_points = grid_points[region.contains((grid_points + 0.5) * grid_size, size=grid_size/2)]
-    hilbert_keys_min = hilbert3d(grid_points, bit_length=level_divide) * np.exp2(ndim * (level_hilbert - level_divide))
-    hilbert_keys_max = (hilbert3d(grid_points, bit_length=level_divide) + 1) * np.exp2(ndim * (level_hilbert - level_divide))
+    hilbert_keys_min = hilbert3d(grid_points, bit_length=level_divide, n_workers=n_workers) * np.exp2(ndim * (level_hilbert - level_divide))
+    hilbert_keys_max = (hilbert3d(grid_points, bit_length=level_divide, n_workers=n_workers) + 1) * np.exp2(ndim * (level_hilbert - level_divide))
     chunk_indices_min = np.searchsorted(hilbert_boundary, hilbert_keys_min, side='right') - 1
     chunk_indices_max = np.searchsorted(hilbert_boundary, hilbert_keys_max, side='left') - 1
 
@@ -108,3 +121,4 @@ def quad_to_f16(by):
     exponent = ((asint >> 112) & 0x7FFF) - 16383
     significand = np.float128((asint & ((1 << 112) - 1)) | (1 << 112))
     return sign * significand * 2.0 ** np.float128(exponent - 112)
+

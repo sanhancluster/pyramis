@@ -545,6 +545,7 @@ def read_part(
             hilbert_boundary=info['bounds'],
             level_hilbert=info['nlevelmax']+1,
             boxlen=info['boxlen'],
+            n_workers=n_workers
         ) + 1
     elif cpulist is None:
         cpulist = np.arange(1, int(info['ncpu'])+1)
@@ -805,6 +806,7 @@ def read_cell(
             hilbert_boundary=info['bounds'],
             level_hilbert=info['nlevelmax']+1,
             boxlen=info['boxlen'],
+            n_workers=n_workers
         ) + 1
     elif cpulist is None:
         cpulist = np.arange(1, int(info['ncpu'])+1)

@@ -3,6 +3,7 @@ import numpy as np
 import numbers
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from .. import uniform_digitize
+from . import run_mp_executor
 
 def _build_tables(bl_max: int):
     """Build state transition tables and power-of-two vector for Hilbert computation."""
@@ -119,9 +120,7 @@ def hilbert3d(
     bit_length: int,
     levels: int | np.ndarray | None=None,
     chunk_size: int=1000000,
-    n_workers: int=1,
-    backend="thread",
-):
+    n_workers: int=1):
     """
     Vectorized NumPy implementation of the Fortran 'hilbert3d' subroutine.
     Supports single-thread, multithread, and multiprocess execution.
@@ -206,12 +205,19 @@ def hilbert3d(
             hdigit_tbl,
             pow2,
         ))
+    
+    results = run_mp_executor(
+        _worker_hilbert,
+        tasks,
+        backend='thread',
+        n_workers=n_workers,
+        mp_method='map',
+        chunksize=1
+    )
 
-    Executor = ThreadPoolExecutor if backend == "thread" else ProcessPoolExecutor
-
-    with Executor(max_workers=n_workers) as ex:
-        for (chunk_start, chunk_end), out_chunk in zip(slices, ex.map(_worker_hilbert, tasks)):
-            order[chunk_start:chunk_end] = out_chunk
+    order = np.zeros(n, dtype=np.float128)
+    for (chunk_start, chunk_end), out_chunk in zip(slices, results):
+        order[chunk_start:chunk_end] = out_chunk
 
     return order
 
