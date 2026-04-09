@@ -2,7 +2,7 @@ from typing import Union
 import numpy as np
 
 from .geometry import Box, Region
-from .utils import hilbert3d
+from .utils.hilbert import hilbert3d, hilbert_shift_left, hilbert_add, hilbert_less_equal, HILBERT_KEY_DTYPE
 from . import get_config, timer
 
 def domain_slice(data, domain_list, bounds):
@@ -89,8 +89,10 @@ def compute_chunk_list_from_hilbert(
 
     if not isinstance(region, Box):
         grid_points = grid_points[region.contains((grid_points + 0.5) * grid_size, size=grid_size/2)]
-    hilbert_keys_min = hilbert3d(grid_points, bit_length=level_divide, n_workers=n_workers) * np.exp2(ndim * (level_hilbert - level_divide))
-    hilbert_keys_max = (hilbert3d(grid_points, bit_length=level_divide, n_workers=n_workers) + 1) * np.exp2(ndim * (level_hilbert - level_divide))
+    _shift = int(ndim * (level_hilbert - level_divide))
+    _keys = hilbert3d(grid_points, bit_length=level_divide, n_workers=n_workers)
+    hilbert_keys_min = hilbert_shift_left(_keys, _shift)
+    hilbert_keys_max = hilbert_shift_left(hilbert_add(_keys, 1), _shift)
     chunk_indices_min = np.searchsorted(hilbert_boundary, hilbert_keys_min, side='right') - 1
     chunk_indices_max = np.searchsorted(hilbert_boundary, hilbert_keys_max, side='left') - 1
 
@@ -100,7 +102,11 @@ def compute_chunk_list_from_hilbert(
 
 
 def assert_ascending(arr, msg="Array is not sorted in ascending order."):
-    if not np.all(arr[:-1] <= arr[1:]):
+    if arr.dtype == HILBERT_KEY_DTYPE:
+        ok = hilbert_less_equal(arr[:-1], arr[1:])
+    else:
+        ok = arr[:-1] <= arr[1:]
+    if not np.all(ok):
         raise ValueError(msg)
 
 
@@ -108,17 +114,55 @@ def str_to_tuple(input_data):
     return tuple(map(int, input_data.split(',')))
 
 
-def quad_to_f16(by):
-    # receives byte array with format of IEEE 754 quadruple float and converts to numpy.float128 array
-    # because quadruple float is not supported in numpy
-    # source: https://stackoverflow.com/questions/52568037/reading-16-byte-fortran-floats-into-python-from-a-file
-    out = []
+def quad_to_f128(by, byteorder: str="little"):
+    """
+    receives byte array with format of IEEE 754 quadruple float and converts to numpy.float128 array
+    because quadruple float is not supported in numpy
+    source: https://stackoverflow.com/questions/52568037/reading-16-byte-fortran-floats-into-python-from-a-file
+    """
     asint = []
     for raw in np.reshape(by, (-1, 16)):
-        asint.append(int.from_bytes(raw, byteorder='little'))
-    asint = np.array(asint)
+        asint.append(int.from_bytes(raw, byteorder=byteorder, signed=False))
+    asint = np.array(asint, dtype=object)
     sign = (np.float128(-1.0)) ** np.float128(asint >> 127)
     exponent = ((asint >> 112) & 0x7FFF) - 16383
     significand = np.float128((asint & ((1 << 112) - 1)) | (1 << 112))
     return sign * significand * 2.0 ** np.float128(exponent - 112)
 
+
+def quad_to_int(by, byteorder: str = "little"):
+    """
+    receives byte array with format of IEEE 754 quadruple float
+    and converts to python int object array
+    """
+    by = np.asarray(by, dtype=np.uint8).ravel()
+    if by.size % 16 != 0:
+        raise ValueError("Input length must be a multiple of 16 bytes")
+
+    asint = []
+    for raw in by.reshape(-1, 16):
+        asint.append(int.from_bytes(raw.tobytes(), byteorder=byteorder, signed=False))
+
+    out = []
+    for bits in asint:
+        sign = -1 if ((bits >> 127) & 1) else 1
+        exp_bits = (bits >> 112) & 0x7FFF
+        frac = bits & ((1 << 112) - 1)
+
+        if exp_bits == 0x7FFF:
+            raise ValueError("NaN or infinity cannot be converted to int")
+
+        if exp_bits == 0:
+            if frac == 0:
+                out.append(0)
+                continue
+            mant = frac
+            shift = 1 - 16383 - 112
+        else:
+            mant = (1 << 112) | frac
+            shift = exp_bits - 16383 - 112
+
+        val = mant << shift if shift >= 0 else mant >> (-shift)
+        out.append(sign * val)
+
+    return np.array(out, dtype=object)

@@ -11,7 +11,8 @@ import configparser
 import re
 from . import get_config, get_dim_keys, get_position, get_velocity, get_vname, get_cell_size, cgs_unit, timer, format_bytes, ANY
 from .astro import get_cosmo_table, cosmo_convert
-from .core import compute_chunk_list_from_hilbert, str_to_tuple, quad_to_f16
+from .core import compute_chunk_list_from_hilbert, str_to_tuple, quad_to_int
+from .utils.hilbert import hilbert_to_compound, HILBERT_KEY_DTYPE
 from pyramis.geometry import Region, Box
 from .utils.fortranfile import FortranFile
 from .utils.arrayview import SharedView
@@ -65,6 +66,9 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], iout_min=Non
     time_list = []
     nstep_coarse_list = []
     aout, tout = None, None
+    if 'cell' in check_data:
+        check_data.remove('cell')
+        check_data.extend(['amr', 'hydro'])
     for d in dirs:
         basename = os.path.basename(d)
         ok = True
@@ -97,9 +101,12 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], iout_min=Non
             nstep_coarse_list.append(info['nstep_coarse'])
             aout = info.get('aout', aout)
             tout = info.get('tout', tout)
-    
+
     table = np.rec.fromarrays([iout_list, aexp_list, time_list, nstep_coarse_list, np.zeros(len(iout_list), dtype=bool)], dtype=[('iout', 'i4'), ('aexp', 'f8'), ('time', 'f8'), ('nstep_coarse', 'i4'), ('scheduled', '?')])
     table.sort(order='iout')
+    
+    if len(iout_list) == 0:
+        return table
 
     if aout is None and tout is None:
         if namelist_path is None:
@@ -243,11 +250,13 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
                 # reads accurate hilbert bounds
                 bounds = f.read_record('b')
                 if bounds.size == 16 * (info['ncpu'] + 1):
-                    # quad case
-                    info['bounds'] = quad_to_f16(bounds)
+                    # quad case: 16-byte IEEE 754 quad float → compound
+                    info['bounds'] = hilbert_to_compound(quad_to_int(bounds))
                 else:
-                    # double case
-                    info['bounds'] = bounds.view('f8')
+                    # double case: float64 values are exact integers at these magnitudes
+                    info['bounds'] = hilbert_to_compound(
+                        np.array([int(x) for x in bounds.view('f8')], dtype=object)
+                    )
 
         coarse_min = [0, 0, 0]
         key = ['i', 'j', 'k']

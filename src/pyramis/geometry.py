@@ -55,8 +55,9 @@ class Box(Region):
             if center is not None and extent is not None:
                 self.set_center(center, extent)
             else:
-                box = [[0, 1], [0, 1], [0, 1]]
-        self.box = np.asarray(box)
+                box = np.asarray([[0, 1], [0, 1], [0, 1]])
+        else:
+            self.box = np.asarray(box)
 
     def set_center(self, center, extent=None):
         center = np.asarray(center)

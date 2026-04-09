@@ -9,7 +9,7 @@ import argparse
 from packaging.version import Version
 from typing import Optional, Tuple
 
-from pyramis.utils import Timestamp, hilbert3d_map
+from pyramis.utils import Timestamp, hilbert3d_map, hilbert_to_compound, hilbert_less_equal, HILBERT_KEY_DTYPE
 from pyramis.utils.arrayview import SharedView
 from pyramis import get_dim_keys, ramses, hdf, set_config, get_config
 import tomllib
@@ -447,9 +447,9 @@ def get_hilbert_key(coordinates:np.ndarray, levelmax:int, levels=None, nthread:i
     # idx_list = np.floor(coordinates * subdivisions).astype(int)
     # npoints = idx_list.shape[0]
     if levels is None:
-        return hilbert3d_map(coordinates, levelmax, kwargs_hilbert3d=dict(n_workers=nthread)).astype(np.float128)
+        return hilbert3d_map(coordinates, levelmax, kwargs_hilbert3d=dict(n_workers=nthread))
     else:
-        return hilbert3d_map(coordinates, levelmax, levels=levels, kwargs_hilbert3d=dict(n_workers=nthread)).astype(np.float128)
+        return hilbert3d_map(coordinates, levelmax, levels=levels, kwargs_hilbert3d=dict(n_workers=nthread))
 
 def get_chunk_boundaries(hilbert_key:np.ndarray, n_chunk:int) -> np.ndarray:
     """
@@ -474,10 +474,12 @@ def assert_sorted(arr: np.ndarray):
     """
     Assert that the input array is sorted in ascending order.
     """
-    try:
-        assert np.all(arr[:-1] <= arr[1:])
-    except AssertionError:
-        idx = np.where(arr[:-1] > arr[1:])[0][0]
+    if arr.dtype == HILBERT_KEY_DTYPE:
+        ok = hilbert_less_equal(arr[:-1], arr[1:])
+    else:
+        ok = arr[:-1] <= arr[1:]
+    if not np.all(ok):
+        idx = np.where(~ok)[0][0]
         print("At idx = ", idx, "value = ", arr[idx], arr[idx+1])
         raise AssertionError("Input array must be sorted in ascending order.")
 
@@ -638,14 +640,12 @@ def set_hilbert_boundaries(coordinates: np.ndarray, levels: Optional[np.ndarray]
     chunk_boundary = get_chunk_boundaries(hilbert_key, n_chunk)
     assert_sorted(chunk_boundary)
 
-    hilbert_key_max = np.exp2(3 * levelmax, dtype=hilbert_key.dtype)  # maximum hilbert key value for levelmax
-
     # generate hilbert key for each chunk boundary
     safe_mask = chunk_boundary < hilbert_key.size
     hilbert_boundary = np.empty(n_chunk+1, dtype=hilbert_key.dtype)
     hilbert_boundary[safe_mask] = hilbert_key[chunk_boundary[safe_mask]]
-    hilbert_boundary[0] = 0
-    hilbert_boundary[~safe_mask] = hilbert_key_max
+    hilbert_boundary[0] = hilbert_to_compound(0)
+    hilbert_boundary[~safe_mask] = hilbert_to_compound(1 << (3 * levelmax))
     assert_sorted(hilbert_boundary)
 
     return chunk_boundary, hilbert_boundary, sort_key

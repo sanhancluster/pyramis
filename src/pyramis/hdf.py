@@ -11,6 +11,7 @@ from .core import compute_chunk_list_from_hilbert
 from .geometry import Region, Box
 from .utils.arrayview import SharedView
 from .utils import run_mp_executor
+from .utils.hilbert import HILBERT_KEY_DTYPE, hilbert_to_compound
 from. import ramses
 from .astro import get_cosmo_table, cosmo_convert
 from . import ANY
@@ -107,6 +108,17 @@ def get_by_type(obj: h5py.File | h5py.Group, name:str, datatype=None):
     if datatype is not None:
         assert isinstance(data, datatype), f"{name} is not of type {datatype}"
     return data
+
+
+def _load_hilbert_boundary(dataset: h5py.Dataset) -> np.ndarray:
+    """Load hilbert_boundary as HILBERT_KEY_DTYPE compound array.
+    Supports both new compound format [('hi', u64), ('lo', u64)] and legacy float128 format.
+    """
+    raw = dataset[:]
+    if raw.dtype.names is not None and 'hi' in raw.dtype.names:
+        return raw  # already compound
+    # Legacy: float128 (or float64 on Windows) stored as plain float array
+    return hilbert_to_compound(np.array([int(x) for x in raw], dtype=object))
 
 
 def remap_dtype_names(dtype: np.dtype, mapping: dict | None=None) -> np.dtype:
@@ -426,7 +438,7 @@ def read_hdf(
         if region is not None:
             chunk_indices = compute_chunk_list_from_hilbert(
                 region=region,
-                hilbert_boundary=get_by_type(group, 'hilbert_boundary', h5py.Dataset)[:],
+                hilbert_boundary=_load_hilbert_boundary(get_by_type(group, 'hilbert_boundary', h5py.Dataset)),
                 level_hilbert=group.attrs.get('levelmax', 1),
                 boxlen=group.parent.attrs.get('boxlen', 1.0),
                 n_workers=n_workers
@@ -434,6 +446,7 @@ def read_hdf(
         else:
             nchunks = int(group.attrs.get('n_chunk', 0))
             chunk_indices = np.arange(nchunks)
+
         if levelmax is not None or levelmin is not None:
             if levelmin is None:
                 levelmin = 1
@@ -445,7 +458,7 @@ def read_hdf(
         else:
             chunk_sizes = 1
     
-    timer.message(f"Total number of chunks to read: {len(chunk_indices)}.")
+    timer.message(f"Total number of chunks to read: {len(chunk_indices)} / {nchunks}.")
 
     if n_workers == 1:
         if not exact_cut:
