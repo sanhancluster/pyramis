@@ -435,6 +435,7 @@ def read_hdf(
 
     with h5py.File(filename, 'r') as f:
         group = get_by_type(f, name, h5py.Group)
+        nchunks = int(group.attrs.get('n_chunk', 0))
         if region is not None:
             chunk_indices = compute_chunk_list_from_hilbert(
                 region=region,
@@ -444,7 +445,6 @@ def read_hdf(
                 n_workers=n_workers
             )
         else:
-            nchunks = int(group.attrs.get('n_chunk', 0))
             chunk_indices = np.arange(nchunks)
 
         if levelmax is not None or levelmin is not None:
