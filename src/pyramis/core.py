@@ -96,6 +96,9 @@ def compute_chunk_list_from_hilbert(
     chunk_indices_min = np.searchsorted(hilbert_boundary, hilbert_keys_min, side='right') - 1
     chunk_indices_max = np.searchsorted(hilbert_boundary, hilbert_keys_max, side='left') - 1
 
+    if chunk_indices_max <= chunk_indices_min:
+        return np.array([], dtype=np.int32)
+
     chunk_indices = np.unique(np.concatenate([np.arange(start, end + 1) for start, end in zip(chunk_indices_min, chunk_indices_max)]))
     timer.message(f"Found {len(chunk_indices)} chunks intersecting the region.", verbose_lim=3)
     return np.sort(chunk_indices).astype(np.int32)
