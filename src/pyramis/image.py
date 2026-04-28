@@ -24,7 +24,6 @@ def get_projection_index(projection=None, ndim=3, dim_keys=None):
     proj : list of int
         List of indices corresponding to the projection axes.
     """
-    print(get_dim_keys())
     if projection is None:
         projection = get_dim_keys()[:2]
     if dim_keys is None:
@@ -251,7 +250,8 @@ def grid_projection(
             # size of the smallest cell in projection axes in the drawing region in the domain coordinate
             dx = (0.5 ** levelmax_draw) / coarse_bins_2d
 
-            shape = tuple(np.round((scope_2d[:, 1] - scope_2d[:, 0]) / dx[:, np.newaxis]).astype(int))
+            shape = tuple(np.round((scope_2d[:, 1] - scope_2d[:, 0]) / dx).astype(int))
+
             if np.prod(shape) >= 1E8:
                 warnings.warn(f"The shape of the grid is too large: {shape}, it may cause memory issues.\nConsider setting a smaller shape manually.")
         else:
