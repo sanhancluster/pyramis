@@ -56,6 +56,10 @@ def _resolve_special_values(cfg):
         cfg['DEFAULT_N_PROCS'] = len(os.sched_getaffinity(0))
 
 def _init_worker_config(cfg):
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    os.environ["OMP_NUM_THREADS"] = "1"      # OpenMP
+    os.environ["MKL_NUM_THREADS"] = "1"      # MKL (Intel)
+    os.environ["NUMEXPR_NUM_THREADS"] = "1"  # NumExpr
     global _config
     _config = {}
     _deep_update(_config, cfg)

@@ -1,6 +1,8 @@
 import numpy as np
 from . import config, cgs_unit, cgs_constants, get_vname
 from scipy.integrate import cumulative_trapezoid
+import re
+
 
 def get_cosmo_table(H0: float, omega_m: float, omega_l: float, omega_k=None, omega_r=None, nbins=5000, aexp_min=1E-4, aexp_max=10.0) -> np.ndarray:
     """
@@ -38,7 +40,7 @@ def get_cosmo_table(H0: float, omega_m: float, omega_l: float, omega_k=None, ome
     tsc = cumulative_trapezoid(dtsc_over_dx, x, initial=0.0)
     tsc = tsc - np.interp(1.0, aexp, tsc)
 
-    dt_over_dx = 1. / (H0 * cgs_unit.km / cgs_unit.Mpc * E)
+    dt_over_dx = 1. / (H0 * cgs_unit['km']['factor'] / cgs_unit['Mpc']['factor'] * E)
     age = cumulative_trapezoid(dt_over_dx, x, initial=0.0)
     z = 1.0 / aexp - 1.0
     table = np.rec.fromarrays([aexp, tsc, age, z], dtype=[('aexp', 'f8'), ('t_sc', 'f8'), ('age', 'f8'), ('z', 'f8')])
@@ -57,18 +59,15 @@ def cosmo_convert(table, x, xname, yname):
     return y
 
 
-def get_age(data, info, unit=None):
+def get_age(data, info):
     t0 = cosmo_convert(info['cosmo_table'], data[get_vname('birth_time')], 't_sc', 'age')
     aexp = info['aexp']
     t = cosmo_convert(info['cosmo_table'], aexp, 'aexp', 'age')
     age = t - t0
-    if unit is not None:
-        age /= cgs_unit.__getattribute__(unit)
     return age
 
 
-def get_temperature(data, info, unit='K'):
-    unit_T = info.get('unit_t', 1.0) ** -2 * info.get('unit_l', 1.0) ** 2 / cgs_constants.k_B * cgs_constants.m_u
-    temperature = data[get_vname('pressure')] / data[get_vname('density')] * unit_T / cgs_unit.__getattribute__(unit)
-
+def get_temperature(data, info):
+    unit_T = info.get('unit_t', 1.0) ** -2 * info.get('unit_l', 1.0) ** 2 / cgs_constants['k_B'] * cgs_constants['m_u']
+    temperature = data[get_vname('pressure')] / data[get_vname('density')] * unit_T
     return temperature

@@ -3,7 +3,7 @@ import pyramis as pyr
 import h5py
 import argparse
 import time
-from pyramis.utils import Timestamp
+from pyramis.utils import Timestamp, ArrayView
 import os
 
 pyr.set_config('VNAME_SET', 'native')
@@ -15,6 +15,12 @@ def export_hdf(repo: str, output_path='SINKPROPS/sinkprops.h5', h5py_kwargs=None
 
     timer.start("Reading sink properties from RAMSES snapshots")
     sp = pyr.ramses.read_sinkprops(repo, use_process=True, copy_result=True)
+    if isinstance(sp, ArrayView):
+        sp = sp._arr
+        info = sp.info
+    else:
+        info = None
+    
     timer.record("Finished reading sink properties from RAMSES snapshots")
 
     timer.start("Processing sink properties")
@@ -70,6 +76,9 @@ def export_hdf(repo: str, output_path='SINKPROPS/sinkprops.h5', h5py_kwargs=None
         f.attrs[f"{pyr.get_vname('icoarse')}_max"] = np.max(steps[pyr.get_vname('icoarse')])
         f.attrs[f"{pyr.get_vname('identity')}_max"] = np.max(sinks[pyr.get_vname('identity')])
 
+        if info is not None:
+            for key, value in info.items():
+                f.attrs[key] = value
 
     timer.record("Finished writing sink properties to HDF5")
 

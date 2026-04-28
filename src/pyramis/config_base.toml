@@ -116,31 +116,68 @@ total_energy = "etot"
 spin_parameter = "spin"
 mass_bulge = "mbulge"
 
-DIM_KEYS = ["x", "y", "z"]
+POSITION_FORMAT = "{dim}"
+VELOCITY_FORMAT = "v{dim}"
+ANGULAR_MOMENTUM_FORMAT = "L{dim}"
+JSINK_FORMAT = "j{dim}"
+SPIN_FORMAT = "s{dim}"
 
 [VNAME_MAPPING.native]
-
-DIM_KEYS = ["position_x", "position_y", "position_z"]
-
+POSITION_FORMAT = "position_{dim}"
+VELOCITY_FORMAT = "velocity_{dim}"
+ANGULAR_MOMENTUM_FORMAT = "angular_momentum_{dim}"
+JSINK_FORMAT = "jsink_{dim}"
+SPIN_FORMAT = "spin_{dim}"
 
 ## Unit definitions for converting between different unit systems.
-[CGS_UNIT]
-km = 1e5
-pc = 3.08e18
-kpc = 3.08e21
-Mpc = 3.08e24
-Gpc = 3.08e27
-yr = 3.1536e7
-Myr = 3.1536e13
-Gyr = 3.1536e16
+## The factor is the conversion factor to CGS units, and dim is the dimension vector [L, M, T] where L is length, M is mass, and T is time.
+[CGS_UNITS]
+### Length units
+cm   = {factor = 1,          dim = [1, 0, 0]}
+m    = {factor = 1e2,        dim = [1, 0, 0]}
+km   = {factor = 1e5,        dim = [1, 0, 0]}
+AU   = {factor = 1.496e13,   dim = [1, 0, 0]}
+ly   = {factor = 9.461e17,   dim = [1, 0, 0]}
+pc   = {factor = 3.08e18,    dim = [1, 0, 0]}
+kpc  = {factor = 3.08e21,    dim = [1, 0, 0]}
+Mpc  = {factor = 3.08e24,    dim = [1, 0, 0]}
+Gpc  = {factor = 3.08e27,    dim = [1, 0, 0]}
 
-K = 1.0
-Msun = 2e33
+### Time units
+s    = {factor = 1,          dim = [0, 0, 1]}
+hr   = {factor = 3600,       dim = [0, 0, 1]}
+yr   = {factor = 3.15576e7,  dim = [0, 0, 1]}
+Myr  = {factor = 3.15576e13, dim = [0, 0, 1]}
+Gyr  = {factor = 3.15576e16, dim = [0, 0, 1]}
+
+### Mass units
+g    = {factor = 1,          dim = [0, 1, 0]}
+kg   = {factor = 1e3,        dim = [0, 1, 0]}
+Msun = {factor = 2e33,       dim = [0, 1, 0]}
+Msol = {factor = 2e33,       dim = [0, 1, 0]}
+
+### Velocity units
+kps  = {factor = 1e5,        dim = [1, 0, -1]}
+
+### Energy units
+erg  = {factor = 1,          dim = [2, 1, -2]}
+eV   = {factor = 1.602e-12,  dim = [2, 1, -2]}
+keV  = {factor = 1.602e-9,   dim = [2, 1, -2]}
+MeV  = {factor = 1.602e-6,   dim = [2, 1, -2]}
+GeV  = {factor = 1.602e-3,   dim = [2, 1, -2]}
+J    = {factor = 1e7,        dim = [2, 1, -2]}
+
+### Pressure units
+Pa   = {factor = 1e1,        dim = [-1, 1, -2]}
+bar  = {factor = 1e6,        dim = [-1, 1, -2]}
 
 ## Physical constants in CGS units.
 [CGS_CONSTANTS]
+c = 2.99792458e10
+G = 6.67430e-8
 m_u = 1.66e-24
 k_B = 1.38e-16
+X_H = 0.76
 
 ## Particle type definitions that can be converted to particle family in RAMSES output. Multiple families can be assigned to the same type.
 [PARTICLE_TYPE_DEFINITION]

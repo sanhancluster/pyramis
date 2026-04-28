@@ -1,14 +1,13 @@
 import os
 from .config_module import get_config, set_config, load_config
-from types import SimpleNamespace
 from platformdirs import user_config_dir
 
 config_path = os.path.join(user_config_dir("pyramis"), "config.toml")
 if os.path.exists(config_path):
     load_config(config_path)
 config = get_config()
-cgs_unit = SimpleNamespace(**config['CGS_UNIT'])
-cgs_constants = SimpleNamespace(**config['CGS_CONSTANTS'])
+cgs_unit = dict(**config['CGS_UNITS'])
+cgs_constants = dict(**config['CGS_CONSTANTS'])
 
 
 from .basic import *

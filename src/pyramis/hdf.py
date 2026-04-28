@@ -6,10 +6,10 @@ from typing import Sequence
 
 import warnings
 
-from . import get_config, get_dim_keys, get_vname, get_mapping, cgs_unit, timer
+from . import get_config, get_dim_keys, get_vname, get_mapping, cgs_unit, timer, get_position_keys
 from .core import compute_chunk_list_from_hilbert
 from .geometry import Region, Box
-from .utils.arrayview import SharedView
+from .utils.arrayview import ArrayView
 from .utils import run_mp_executor
 from .utils.hilbert import HILBERT_KEY_DTYPE, hilbert_to_compound
 from. import ramses
@@ -60,7 +60,7 @@ def check_snapshots(path: str, check_data=['cell', 'part'], check_info=['aexp', 
     if len(check_info) > 0:
         for iout in iout_list:
             try:
-                info = get_info(path, iout, cosmo=False, check_data=check_data)
+                info = read_info(path, iout, cosmo=False, check_data=check_data)
             except BlockingIOError:
                 timer.message(f"Skipping file for iout={iout}, which is currently locked.")
                 continue
@@ -163,7 +163,7 @@ def _chunk_size_worker(
         dtype = data.dtype
 
         vname_set_file = f.attrs.get('vname_set', 'native')
-        fields_file = get_dim_keys(name_set=vname_set_file)
+        fields_file = get_position_keys()
         if is_cell:
             fields_file = fields_file + ['level']
 
@@ -305,7 +305,7 @@ def _chunk_slice_hdf_mp(
             if copy_result:
                 result = np.array(shared_arr, copy=True)
             else:
-                result = SharedView(shm, (ndata_tot,), dtype_out)
+                result = ArrayView(shm, (ndata_tot,), dtype_out)
                 
         finally:
             if copy_result:
@@ -397,7 +397,7 @@ def read_hdf(
         copy_result=True,
         is_cell=False,
         vname_set=None,
-        use_vname_mapping=True):
+        use_vname_mapping=True) -> ArrayView:
 
     config = get_config()
 
@@ -416,8 +416,8 @@ def read_hdf(
     
     if exact_cut and region is not None and target_fields is not None:
         warn = False
-        dim_keys = get_dim_keys()
-        for key in dim_keys:
+        pos_keys = get_position_keys()
+        for key in pos_keys:
             if key not in target_fields:
                 warn = True
                 target_fields = target_fields + [key]
@@ -434,6 +434,7 @@ def read_hdf(
         region = Box(region)
 
     with h5py.File(filename, 'r') as f:
+        info = read_info_from_hdf(f)
         group = get_by_type(f, name, h5py.Group)
         nchunks = int(group.attrs.get('n_chunk', 0))
         if region is not None:
@@ -470,6 +471,11 @@ def read_hdf(
         result = _chunk_slice_hdf_mp(filename, name, chunk_indices, chunk_sizes=chunk_sizes, region=region, target_fields=target_fields, n_workers=n_workers, mp_backend=mp_backend, copy_result=copy_result, is_cell=is_cell, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
 
     timer.record(f"Finished reading HDF5 data from {filename}. Found {len(result)} items.")
+    if isinstance(result, ArrayView):
+        result.info = info
+    else:
+        result = ArrayView(result, info=info)
+    
     return result
 
 
@@ -484,7 +490,7 @@ def read_part(
         use_process=True,
         copy_result=True,
         vname_set=None,
-        use_vname_mapping=True):
+        use_vname_mapping=True) -> ArrayView:
     """
     Read particle data from HDF5 file.
 
@@ -530,6 +536,7 @@ def read_part(
     else:
         filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data='part', iout=iout))
     data = read_hdf(filename, part_type, region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=False, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
+
     return data
 
 
@@ -545,7 +552,7 @@ def read_cell(
         copy_result=True,
         read_branch=False,
         vname_set=None,
-        use_vname_mapping=True):
+        use_vname_mapping=True) -> ArrayView:
     """
     Read cell data from HDF5 file.
 
@@ -600,7 +607,6 @@ def read_cell(
         data = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
     else:
         data = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
-
     return data
 
 
@@ -756,7 +762,39 @@ def read_sinkprops(
     return out
 
 
-def get_info(path: str, iout: int, cosmo=True, cosmo_table=None, check_data=['cell', 'part']) -> dict:
+def read_info_from_hdf(f: h5py.File, cosmo=True, cosmo_table=None) -> dict:
+    """
+    Extract simulation info from an open HDF5 file.
+
+    Parameters
+    ----------
+    f : h5py.File
+        Open HDF5 file object.
+    cosmo : bool, optional
+        Whether to include cosmology table and lookback time. Defaults to True.
+    cosmo_table : dict, optional
+        Precomputed cosmology table. If None, it will be created from file attributes.
+
+    Returns
+    -------
+    dict
+        Dictionary containing simulation info extracted from file attributes.
+    """
+    attrs = dict(f.attrs)
+    if cosmo:
+        if cosmo_table is None:
+            H0 = attrs.get('H0', 70.0)
+            omega_m = attrs.get('omega_m', 0.3)
+            omega_l = attrs.get('omega_l', 0.7)
+            omega_k = attrs.get('omega_k', 0.0)
+            omega_r = attrs.get('omega_r', 0.0)
+            cosmo_table = get_cosmo_table(H0, omega_m, omega_l, omega_k=omega_k, omega_r=omega_r)
+        attrs['cosmo_table'] = cosmo_table
+        attrs['lookback_time'] = cosmo_convert(attrs['cosmo_table'], 1.0, 'aexp', 'age') / cgs_unit['Gyr']['factor'] - attrs['age']
+    return attrs
+
+
+def read_info(path: str, iout: int, cosmo=True, cosmo_table=None, check_data=['cell', 'part']) -> dict:
     """
     Get simulation info from HDF5 file attributes.
 
@@ -784,17 +822,8 @@ def get_info(path: str, iout: int, cosmo=True, cosmo_table=None, check_data=['ce
         timer.message(f"Reading simulation info from {fn}...", 2)
         try:
             with h5py.File(fn, 'r') as f:
-                attrs = dict(f.attrs)
-                if cosmo:
-                    if cosmo_table is None:
-                        H0 = attrs.get('H0', 70.0)
-                        omega_m = attrs.get('omega_m', 0.3)
-                        omega_l = attrs.get('omega_l', 0.7)
-                        omega_k = attrs.get('omega_k', 0.0)
-                        omega_r = attrs.get('omega_r', 0.0)
-                        cosmo_table = get_cosmo_table(H0, omega_m, omega_l, omega_k=omega_k, omega_r=omega_r)
-                    attrs['cosmo_table'] = cosmo_table
-                    attrs['lookback_time'] = cosmo_convert(attrs['cosmo_table'], 1.0, 'aexp', 'age') / cgs_unit.Gyr - attrs['age']
+                attrs = read_info_from_hdf(f, cosmo=cosmo, cosmo_table=cosmo_table)
+                break
         except BlockingIOError:
             timer.message(f"Skipping file {fn}, which is currently locked.")
             continue

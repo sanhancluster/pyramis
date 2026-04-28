@@ -9,13 +9,13 @@ from concurrent.futures import as_completed
 import configparser
 
 import re
-from . import get_config, get_dim_keys, get_position, get_velocity, get_vname, get_cell_size, cgs_unit, timer, format_bytes, ANY
+from . import get_config, get_vname, cgs_unit, timer, format_bytes, ANY, get_position_keys
 from .astro import get_cosmo_table, cosmo_convert
 from .core import compute_chunk_list_from_hilbert, str_to_tuple, quad_to_int
 from .utils.hilbert import hilbert_to_compound, HILBERT_KEY_DTYPE
 from pyramis.geometry import Region, Box
 from .utils.fortranfile import FortranFile
-from .utils.arrayview import SharedView
+from .utils.arrayview import ArrayView
 from .utils import get_mp_executor
 
 import numpy as np
@@ -210,9 +210,15 @@ def parse_namelist(filename):
     return namelist_data
 
 
-def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None, read_amr=True, read_hydro=True) -> dict:
+def read_info(output_path, iout: int | None=None, namelist_path=None, cosmo=True, cosmo_table=None, read_amr=True, read_hydro=True) -> dict:
     config = get_config()
-    info_path = os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), f'info_{iout:05d}.txt')
+    if iout is None:
+        files = glob.glob(os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=ANY), f'info_{ANY:05d}.txt'))
+        if len(files) == 0:
+            raise FileNotFoundError(f"No info file found in {output_path}.")
+        info_path = files[0]
+    else:
+        info_path = os.path.join(output_path, config['OUTPUT_FORMAT'].format(iout=iout), f'info_{iout:05d}.txt')
     timer.message(f"Getting info for iout={iout} from {output_path}...", 2)
     info = parse_info(info_path)
     info['iout'] = iout
@@ -234,7 +240,7 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
             info['ngrid_current'] = f.read_ints()
             info['boxlen'], = f.read_reals()
 
-            info['noutput'], info['iout'], info['ifout'], = f.read_ints()
+            info['noutput'], info['idout'], info['ifout'], = f.read_ints()
             info['tout'] = f.read_reals()
             info['aout'] = f.read_reals()
             info['time'], = f.read_reals()
@@ -309,8 +315,8 @@ def get_info(output_path, iout, namelist_path=None, cosmo=True, cosmo_table=None
                 omega_k=info['omega_k'],
                 omega_r=info.get('omega_r', None),
             )
-        info['age'] = cosmo_convert(info['cosmo_table'], info['aexp'], 'aexp', 'age') / cgs_unit.Gyr
-        info['lookback_time'] = cosmo_convert(info['cosmo_table'], 1.0, 'aexp', 'age') / cgs_unit.Gyr - info['age']
+        info['age'] = cosmo_convert(info['cosmo_table'], info['aexp'], 'aexp', 'age') / cgs_unit['Gyr']['factor']
+        info['lookback_time'] = cosmo_convert(info['cosmo_table'], 1.0, 'aexp', 'age') / cgs_unit['Gyr']['factor'] - info['age']
         info['z'] = 1.0 / info['aexp'] - 1.0
 
     return info
@@ -382,7 +388,7 @@ def read_npart_per_cpu(path, iout, cpulist=None, dtype_read=None, part_type=None
     timer.message(f"Reading number of particles per CPU for iout={iout} from {path}...", 2)
     if cpulist is None:
         if info is None:
-            info = get_info(path, iout)
+            info = read_info(path, iout)
         cpulist = np.arange(1, int(info['ncpu'])+1)
     if dtype_read is None:
         dtype_read = read_type_descriptor(path, iout, 'part')
@@ -443,38 +449,6 @@ def mask_by_part_type(part, part_type):
     return mask
 
 
-@overload
-def read_part(
-    path: str, 
-    iout: int | None = None, 
-    region: Region | np.ndarray | list | None = None, 
-    cpulist: Sequence[int] | np.ndarray | None = None,
-    target_fields: Sequence[str] | None = None,
-    part_type: str | None=None, 
-    dtype: np.dtype | list | None = None,
-    info: dict | None = None,
-    read_cpu=False,
-    exact_cut: Literal[False] = False,
-    n_workers: int | None=None,
-    use_process: Literal[True] = True,
-    copy_result: Literal[False] = False) -> SharedView: ...
-
-@overload
-def read_part(
-    path: str, 
-    iout: int | None = None, 
-    region: Region | np.ndarray | list | None = None, 
-    cpulist: Sequence[int] | np.ndarray | None = None,
-    target_fields: Sequence[str] | None = None,
-    part_type: str | None=None, 
-    dtype: np.dtype | list | None = None,
-    info: dict | None = None,
-    read_cpu=False,
-    exact_cut: bool=True,
-    n_workers: int | None=None,
-    use_process: bool = False,
-    copy_result: bool = True) -> np.ndarray: ...
-
 def read_part(
         path: str, 
         iout: int | None = None, 
@@ -488,7 +462,7 @@ def read_part(
         exact_cut: bool=True,
         n_workers: int | None=None,
         use_process: bool=False,
-        copy_result: bool=True) -> np.ndarray | SharedView:
+        copy_result: bool=True) -> ArrayView:
 
     config = get_config()
     timer.start(f"Reading particle data from {path} at iout={iout}...")
@@ -500,7 +474,7 @@ def read_part(
         region = Box(region)
 
     if info is None:
-        info = get_info(path, iout)
+        info = read_info(path, iout)
     
     if use_process:
         mp_backend = "process"
@@ -592,11 +566,14 @@ def read_part(
     
     if exact_cut and region is not None:
         result2 = result[region.contains_data(result, cell=False)]
-        if isinstance(result, SharedView):
+        if isinstance(result, ArrayView):
             result.close()
         result = result2
     timer.record(f"Finished reading particle data from {path} at iout={iout}. Found {len(result)} particles.")
-
+    if isinstance(result, ArrayView):
+        result.info = info
+    else:
+        result = ArrayView(result, info=info)
     return result
 
 
@@ -654,9 +631,9 @@ def read_ncell_per_cpu(path, iout, cpulist=None, info=None, read_branch=False) -
     config = get_config()
     timer.message(f"Reading number of cells per CPU for iout={iout} from {path}...", 2)
     if info is None:
-        info = get_info(path, iout)
+        info = read_info(path, iout)
     if cpulist is None:
-        info = get_info(path, iout)
+        info = read_info(path, iout)
         cpulist = np.arange(1, int(info['ncpu'])+1)
 
     ndim = info['ndim']
@@ -702,44 +679,6 @@ def read_ncell_per_cpu(path, iout, cpulist=None, info=None, read_branch=False) -
     return np.array(ncell_cpu)
 
 
-@overload
-def read_cell(
-    path: str,
-    iout: int | None = None,
-    region: Region | np.ndarray | list | None = None,
-    cpulist: Sequence[int] | np.ndarray | None = None,
-    target_fields: Sequence[str] | None = None,
-    dtype_hydro = None,
-    info: dict | None = None,
-    read_hydro: bool = True,
-    read_grav: bool = False,
-    read_cpu: bool = False,
-    read_branch: bool = False,
-    exact_cut: Literal[False] = False,
-    n_workers: int | None = None,
-    use_process: Literal[True] = True,
-    copy_result: Literal[False] = False,
-) -> SharedView: ...
-
-@overload
-def read_cell(
-    path: str,
-    iout: int | None = None,
-    region: Region | np.ndarray | list | None = None,
-    cpulist: Sequence[int] | np.ndarray | None = None,
-    target_fields: Sequence[str] | None = None,
-    dtype_hydro = None,
-    info: dict | None = None,
-    read_hydro: bool = True,
-    read_grav: bool = False,
-    read_cpu: bool = False,
-    read_branch: bool = False,
-    exact_cut: bool=True,
-    n_workers: int | None = None,
-    use_process: bool = False,
-    copy_result: bool = True,
-) -> np.ndarray: ...
-
 def read_cell(
         path: str, 
         iout: int | None = None, 
@@ -755,7 +694,7 @@ def read_cell(
         exact_cut: bool=True,
         n_workers: int | None = None,
         use_process: bool=False,
-        copy_result: bool=True) -> np.ndarray | SharedView:
+        copy_result: bool=True) -> ArrayView:
 
     config = get_config()
     timer.start(f"Reading cell data from {path} at iout={iout}...")
@@ -764,7 +703,7 @@ def read_cell(
         region = Box(region)
 
     if info is None:
-        info = get_info(path, iout)
+        info = read_info(path, iout)
 
     if n_workers is None:
         n_workers = config['DEFAULT_N_PROCS']
@@ -779,9 +718,8 @@ def read_cell(
     else:
         output_name = path
 
-    dim_dtype = [(key, np.float64) for key in get_dim_keys()[:info['ndim']]]
-    descr_out = dim_dtype + [(get_vname('level'), np.int32)]
-    #dtype_out = np.dtype(dim_dtype + [(get_vname('level'), np.int32)])
+    pos_dtype = [(key, np.float64) for key in get_position_keys()[:info['ndim']]]
+    descr_out = pos_dtype + [(get_vname('level'), np.int32)]
 
     if read_hydro:
         fd_path = os.path.join(output_name, config['FILE_DESCRIPTOR_FORMAT'].format(data='hydro'))
@@ -827,7 +765,7 @@ def read_cell(
     size_byte = ncell * dtype_out.itemsize
     timer.message(f"Total number of cells to read: {ncell} ({format_bytes(size_byte)}) across {len(cpulist)} / {int(info['ncpu'])} files.")
     if ncell == 0:
-        return np.empty(0, dtype=dtype_out)
+        return ArrayView(np.empty(0, dtype=dtype_out), info=info)
     
     args = (path, iout, dtype_hydro, read_hydro, read_grav, read_branch, info)
 
@@ -854,10 +792,14 @@ def read_cell(
     
     if exact_cut and region is not None:
         result2 = result[region.contains_data(result, cell=True, boxlen=info['boxlen'])]
-        if isinstance(result, SharedView):
+        if isinstance(result, ArrayView):
             result.close()
         result = result2
     timer.record(f"Finished reading cell data from {path} at iout={iout}. Found {len(result)} cells.")
+    if isinstance(result, ArrayView):
+        result.info = info
+    else:
+        result = ArrayView(result, info=info)
 
     return result
 
@@ -875,7 +817,7 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
     ])
 
     if info is None:
-        info = get_info(path, iout)
+        info = read_info(path, iout)
     
     dtype_out = output_arr.dtype
     
@@ -929,9 +871,9 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
                 f_amr.skip_records(3)
 
                 pos = [] # list of position arrays
-                dim_keys = get_dim_keys()
+                pos_keys = get_position_keys()
                 for idim in range(ndim):
-                    if dim_keys[idim] in dtype_out.names:
+                    if pos_keys[idim] in dtype_out.names:
                         p = f_amr.read_reals(np.float64)
                         pos.append((p + oct_offset_local[:, idim] / 2**ilevel - coarse_min[idim]) * boxlen)
                     else:
@@ -953,7 +895,7 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
                 nread_arr[ilevel - 1] = np.sum(ok, axis=1)
 
                 for idim in range(ndim):
-                    key = get_dim_keys()[idim]
+                    key = pos_keys[idim]
                     if key in dtype_out.names:
                         output_arr[cursor:cursor + nread][key] = pos[idim][iread, jread]
                 if 'level' in dtype_out.names:
@@ -1088,7 +1030,7 @@ def _read_from_cpulist_mp(
         func: Callable,
         n_workers: int,
         mp_backend: str,
-        copy_result: bool) -> np.ndarray | SharedView:
+        copy_result: bool) -> np.ndarray | ArrayView:
     ndata = np.sum(ndata_per_cpu) if len(ndata_per_cpu) > 0 else 0
     if ndata == 0:
         # No data at all
@@ -1128,7 +1070,7 @@ def _read_from_cpulist_mp(
                 result = np.array(shared_arr, copy=True)
             else:
                 # Return the shared view; caller must manage shm lifetime
-                result = SharedView(shm, (ndata,), dtype_out)
+                result = ArrayView(shm, (ndata,), dtype_out)
         finally:
             # Clean up shared memory if we own it (copy_result=True).
             if copy_result:
@@ -1171,7 +1113,7 @@ def read_sink(
         target_fields: Sequence[str] | None = None,
         dtype: np.dtype | list | None = None,
         info: dict | None = None,
-        exact_cut: bool=True) -> np.ndarray:
+        exact_cut: bool=True) -> ArrayView:
 
     config = get_config()
     timer.start(f"Reading sink data from {path} at iout={iout}...")
@@ -1180,7 +1122,7 @@ def read_sink(
         region = Box(region)
 
     if info is None:
-        info = get_info(path, iout)
+        info = read_info(path, iout)
 
     output_dir = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout))
     if dtype is None:
@@ -1212,6 +1154,7 @@ def read_sink(
         nsink = f.read_ints('i4')
         result = np.empty(nsink, dtype=dtype_out)
         if nsink == 0:
+            result = ArrayView(result, info=info)
             return result
         f.skip_records(1)
 
@@ -1221,7 +1164,8 @@ def read_sink(
         result = result[region.contains_data(result, cell=False)]
 
     timer.record(f"Finished reading sink data from {filename}. Found {len(result)} sink particles.")
-    return result
+
+    return ArrayView(result, info=info)
 
 
 # Functions for reading sink properties
@@ -1260,10 +1204,14 @@ def read_sinkprops(
         dtype: np.dtype | list | None = None,
         n_workers: int | None = None,
         use_process: bool = True,
-        copy_result: bool = True):
+        copy_result: bool = True) -> ArrayView | np.ndarray:
 
     config = get_config()    
     timer.record(f"Reading sink properties from {path}...")
+    try:
+        info = read_info(path, iout=None)
+    except FileNotFoundError:
+        info = None
 
     if n_workers is None:
         n_workers = config['DEFAULT_N_PROCS']
@@ -1296,7 +1244,11 @@ def read_sinkprops(
     timer.message(f"Found {len(icoarse_read)} sink property files to read ({format_bytes(size)}).")
 
     if len(icoarse_read) == 0:
-        return np.empty(0, dtype=dtype_out)
+        out = np.empty(0, dtype=dtype_out)
+        if info is not None:        
+            return ArrayView(out, info=info)
+        else:
+            return out
     
     # get number of sink particles per file
     nsink_per_file = read_nsinkprops_per_file(path, icoarse_read)
@@ -1304,7 +1256,11 @@ def read_sinkprops(
     # Total number of sink particles across all files
     ndata_tot = np.sum(nsink_per_file)
     if ndata_tot == 0:
-        return np.empty(0, dtype=dtype_out)
+        out = np.empty(0, dtype=dtype_out)
+        if info is not None:
+            return ArrayView(out, info=info)
+        else:
+            return out
     
     # Precompute offsets for each file
     offsets = np.zeros_like(nsink_per_file)
@@ -1339,7 +1295,7 @@ def read_sinkprops(
             if copy_result:
                 result = np.array(shared_arr, copy=True)
             else:
-                result = SharedView(shm, (ndata_tot,), dtype_out)
+                result = ArrayView(shm, (ndata_tot,), dtype_out)
 
         finally:
             if copy_result:
@@ -1367,6 +1323,9 @@ def read_sinkprops(
         result = shared_arr
     timer.record(f"Finished reading sink properties from {path}. Found {len(result)} items.")
     
-    return result
+    if info is not None:
+        return ArrayView(result, info=info)
+    else:
+        return result
 
         

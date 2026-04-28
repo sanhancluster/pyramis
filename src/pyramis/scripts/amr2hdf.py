@@ -10,14 +10,14 @@ from packaging.version import Version
 from typing import Optional, Tuple
 
 from pyramis.utils import Timestamp, hilbert3d_map, hilbert_to_compound, hilbert_less_equal, HILBERT_KEY_DTYPE
-from pyramis.utils.arrayview import SharedView
-from pyramis import get_dim_keys, ramses, hdf, set_config, get_config
+from pyramis.utils.arrayview import ArrayView
+from pyramis import ramses, hdf, set_config, get_config, get_vname, get_position_keys
 import tomllib
 
 set_config('VNAME_SET', 'native')
 
 def create_hdf5_part(path, iout, n_chunk:int, size_load:int, converted_dtypes, output_path:str='hdf', cpu_list=None, dataset_kw:dict={}, overwrite:bool=False, sim_description:str='', sim_publication:str='', version:str='1.0', nthread=8, update_attributes=False, no_input=False):
-    info = ramses.get_info(path, iout)
+    info = ramses.read_info(path, iout)
 
     if cpu_list is None:
         cpu_list = np.arange(1, info['ncpu'] + 1, dtype='i4')
@@ -109,7 +109,7 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
     Get a new dictionary to store particle data for each type.
     """
     names = converted_dtypes.keys()
-    info = ramses.get_info(path, iout)
+    info = ramses.read_info(path, iout)
 
     # pre-define the new particle array based on the snapshot header
     new_part_dict = {}
@@ -149,7 +149,7 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
         npart_per_cpu = ramses.read_npart_per_cpu(path, iout, cpu_list_sub)
         for offset, n in zip(np.cumsum(npart_per_cpu), npart_per_cpu):
             part_slice = part_data[offset - n:offset]
-            hkey = get_hilbert_key(np.asarray([part_slice[key] for key in get_dim_keys()]).T, info['nlevelmax'], nthread=nthread)
+            hkey = get_hilbert_key(np.asarray([part_slice[key] for key in get_position_keys()]).T, info['nlevelmax'], nthread=nthread)
             sort_idx = np.argsort(hkey, kind='mergesort')
             part_data[offset-n:offset] = part_slice[sort_idx]
         
@@ -159,7 +159,7 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
             if name == 'sink':
                 if pointer_dict[name] == 0: # we load sink data only once
                     part = ramses.read_sink(path=path, iout=iout)
-                    hilbert_key = get_hilbert_key(np.asarray([part[key] for key in get_dim_keys()]).T, info['nlevelmax'], nthread=nthread)
+                    hilbert_key = get_hilbert_key(np.asarray([part[key] for key in get_position_keys()]).T, info['nlevelmax'], nthread=nthread)
                     part = part[np.argsort(hilbert_key)] # already Particle class at this point
                 else: # sink data is alrady loaded
                     continue
@@ -174,7 +174,7 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
                 new_part_dict[name][pointer_dict[name]:pointer_dict[name] + part.size][field[0]] = part[field[0]]
             pointer_dict[name] += part.size
         
-        if isinstance(part_data, SharedView):
+        if isinstance(part_data, ArrayView):
             part_data.close()
         del part_data
     
@@ -198,7 +198,7 @@ def create_hdf5_cell(path, iout, n_chunk:int, size_load:int, converted_dtypes, o
     """
     Export cell data from the snapshot to HDF5 format.
     """
-    info = ramses.get_info(path, iout)
+    info = ramses.read_info(path, iout)
     if cpu_list is None:
         cpu_list = np.arange(1, info['ncpu'] + 1, dtype='i4')
     else:
@@ -283,7 +283,7 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
     Get a new array to store cell data.
     """
 
-    info = ramses.get_info(path, iout)
+    info = ramses.read_info(path, iout)
 
     new_cell = None
     pointer = 0
@@ -307,7 +307,7 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
         ncell_per_cpu = ramses.read_ncell_per_cpu(path, iout, cpu_list_sub, read_branch=read_branch)
         for offset, n in zip(np.cumsum(ncell_per_cpu), ncell_per_cpu):
             cell_slice = cell_data[offset - n:offset]
-            hkey = get_hilbert_key(np.asarray([cell_slice[key] for key in get_dim_keys()]).T, info['nlevelmax'], nthread=nthread)
+            hkey = get_hilbert_key(np.asarray([cell_slice[key] for key in get_position_keys()]).T, info['nlevelmax'], nthread=nthread)
             sort_idx = np.argsort(hkey, kind='mergesort')
             cell_data[offset-n:offset] = cell_slice[sort_idx]
 
@@ -316,7 +316,7 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
         for field in new_dtypes:
             new_cell[pointer:pointer + cell_data.size][field[0]] = cell_data[field[0]]
         pointer += cell_data.size
-        if isinstance(cell_data, SharedView):
+        if isinstance(cell_data, ArrayView):
             cell_data.close()
         del cell_data
     return new_cell, pointer
@@ -351,7 +351,7 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
         return
 
     timer.message(f"Getting info from snapshots in {path}, iout = {iout_list[-1]}...")
-    info = ramses.get_info(path, iout_list[-1])
+    info = ramses.read_info(path, iout_list[-1])
     if size_load <= 0:
         size_load = info['ncpu']
 
@@ -371,7 +371,7 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
                         continue
 
                     dt = np.dtype(fmt)
-                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_dim_keys():
+                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_position_keys():
                         new_fmt = np.dtype(dt.byteorder + 'f4')
                     else:
                         new_fmt = dt
@@ -384,14 +384,14 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
                     new_dtype.append((key, new_fmt))
                 converted_dtypes_part[name] = new_dtype
             
-            if os.path.exists(config['FILENAME_FORMAT'].format(data='sink', iout=iout, icpu=1)):
+            if os.path.exists(config['FILENAME_FORMAT_RAMSES'].format(data='sink', iout=iout, icpu=1)):
                 dtype_sink = ramses.read_sink(path, iout).dtype
                 new_dtype = []
                 for desc in dtype_sink.descr:
                     key = desc[0]
                     fmt = desc[1]
                     dt = np.dtype(fmt)
-                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_dim_keys():
+                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_position_keys():
                         new_fmt = np.dtype(dt.byteorder + 'f4')
                     else:
                         new_fmt = dt
@@ -405,7 +405,7 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
                 new_dtype = []
                 for key, fmt in dtype_cell.descr:
                     dt = np.dtype(fmt)
-                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_dim_keys():
+                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_position_keys():
                         new_fmt = np.dtype(dt.byteorder + 'f4')
                     else:
                         new_fmt = dt
@@ -569,7 +569,7 @@ def add_group(fl:h5py.File, name:str, new_data:np.ndarray, levelmin:int, levelma
     timer.message(f"Measuring Hilbert key for {name} data...")
 
     # compute chunk boundaries based on Hilbert key and sort the data accordingly
-    coordinates = np.array([new_data[key] for key in get_dim_keys()]).T
+    coordinates = np.array([new_data[key] for key in get_position_keys()]).T
     if not part:
         # use level information to compute Hilbert key for cells
         chunk_boundary, hilbert_boundary, sort_key1 = set_hilbert_boundaries(coordinates, new_data['level'], n_chunk, levelmax, part=part, sort=sort)

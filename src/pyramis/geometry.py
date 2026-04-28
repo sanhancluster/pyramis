@@ -1,5 +1,5 @@
 import numpy as np
-from . import get_dim_keys, get_cell_size
+from . import get_position_keys, get_cell_size, get_vname
 
 class Region():
     def evaluate(self, data):
@@ -100,7 +100,7 @@ class Box(Region):
             half_size = np.asarray(0.0)
 
         mask = np.ones(len(data), dtype=bool)
-        for i, key in enumerate(get_dim_keys()):
+        for i, key in enumerate(get_position_keys()):
             if np.ndim(half_size) == 0:
                 h = half_size
             elif np.ndim(half_size) == 1:
@@ -147,7 +147,7 @@ class Sphere(Region):
 
         # TODO: need more accurate intersection
         dist2 = np.zeros(len(data), dtype=float)
-        for i, key in enumerate(get_dim_keys()):
+        for i, key in enumerate(get_position_keys()):
             dist2 += (data[key] - center[i])**2
         mask = np.sqrt(dist2) <= radius - half_size
         return mask
@@ -188,7 +188,7 @@ class Spheroid(Region):
 
         # TODO: need more accurate intersection
         dist2 = np.zeros(len(data), dtype=float)
-        for i, key in enumerate(get_dim_keys()):
+        for i, key in enumerate(get_position_keys()):
             normed = (data[key] - center[i]) / (radii[i] - half_size)
             dist2 += normed**2
         mask = dist2 <= 1
