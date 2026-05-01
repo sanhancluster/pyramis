@@ -6,7 +6,9 @@ from typing import Sequence
 
 import warnings
 
-from . import get_config, get_dim_keys, get_vname, get_mapping, cgs_unit, timer, get_position_keys
+from .config_module import get_mapping, get_vname
+
+from . import get_config, get_dim_keys, cgs_unit, timer, get_position_keys
 from .core import compute_chunk_list_from_hilbert
 from .geometry import Region, Box
 from .utils.arrayview import ArrayView
@@ -15,7 +17,7 @@ from .utils.hilbert import HILBERT_KEY_DTYPE, hilbert_to_compound
 from. import ramses
 from .astro import get_cosmo_table, cosmo_convert
 from . import ANY
-from .ramses import scheduled_snapshots
+from .ramses import _scheduled_snapshots
 
 from multiprocessing.shared_memory import SharedMemory
 
@@ -91,11 +93,11 @@ def check_snapshots(path: str, check_data=['cell', 'part'], check_info=['aexp', 
 
         if 'aexp' in check_info and aout is not None and len(aout) > 0 and not np.all(aout == 0.0):
             a_thr = table['aexp'] / table['icoarse'] * scale_threshold
-            scheduled |= scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
+            scheduled |= _scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
 
         if 'time' in check_info and tout is not None and len(tout) > 0 and not np.all(tout == 0.0):
             t_thr = table['time'] / table['icoarse'] * scale_threshold
-            scheduled |= scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
+            scheduled |= _scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
 
         table['scheduled'] = scheduled
 
@@ -149,143 +151,84 @@ def remap_dtype_names(dtype: np.dtype, mapping: dict | None=None) -> np.dtype:
     return new_dtype
 
 
-def _chunk_size_worker(
-        args):
-    path, name, start, end, region, is_cell = args
-
-    with h5py.File(path, 'r', locking=False) as f:
-        group = get_by_type(f, name, h5py.Group)
-        
-        if region is None:
-            return group.attrs['size']
-            
-        data = get_by_type(group, 'data', h5py.Dataset)
-        dtype = data.dtype
-
-        vname_set_file = f.attrs.get('vname_set', 'native')
-        fields_file = get_position_keys()
-        if is_cell:
-            fields_file = fields_file + ['level']
-
-        new_dtype = np.dtype([(name, dtype.fields[name][0]) for name in fields_file if name in dtype.names])
-        new_dtype = remap_dtype_names(new_dtype)
-    
-        data_slice = data.fields(fields_file)[start:end].view(new_dtype)
-        boxsize = f.attrs.get('boxsize', 1.0)
-        mask = region.contains_data(data_slice, cell=is_cell, boxlen=boxsize)
-
-        return np.sum(mask)
-
-
-def _load_slice_worker(args):
-    """
-    Worker that reads a slice from an HDF5 dataset and writes it directly
-    into a shared memory NumPy array.
-
-    Parameters
-    ----------
-    args : tuple
-        (
-            path,           # HDF5 file path
-            group_name,     # HDF5 group containing 'data'
-            target_fields,  # None or list of field names for compound dtype
-            shm_name,       # name of existing SharedMemory block
-            total_len,      # total number of rows in the final array
-            shape_tail,     # trailing shape (dataset.shape[1:])
-            dtype_str,      # dtype as string (e.g. '<f8')
-            start,          # slice start index
-            end,            # slice end index
-            offset          # where to write in the shared array
-        )
-    """
-
-    (path, group_name, target_fields_native,
-     shm_name, shared_arr, ndata_tot, dtype_out,
-     start, end, offset, ndata, region, is_cell) = args
-
-    # Each worker opens the HDF5 file independently.
+def _load_filter_worker(args):
+    path, group_name, target_fields_native, dtype_out, start, end, region, is_cell, subsample = args
     with h5py.File(path, 'r', locking=False) as f:
         group = f.get(group_name)
         data = group.get('data')
         if target_fields_native is not None:
-            # If dataset is compound, select only requested fields.
             data = data.fields(target_fields_native)
+        if subsample is None:
+            subsample = 1
+        data_slice = data[start:end:subsample].view(dtype_out)
+        boxsize = f.attrs.get('boxsize', 1.0)
+        mask = region.contains_data(data_slice, cell=is_cell, boxlen=boxsize)
+        data_slice = data_slice[mask]
+        return data_slice
 
+
+def _load_slice_worker(args):
+    (path, group_name, target_fields_native,
+     shm_name, shared_arr, ndata_tot, dtype_out,
+     start, end, offset, ndata) = args
+
+    with h5py.File(path, 'r', locking=False) as f:
+        group = f.get(group_name)
+        data = group.get('data')
+        if target_fields_native is not None:
+            data = data.fields(target_fields_native)
         data_slice = data[start:end].view(dtype_out)
-        # Precompute mask if needed
-        if region is not None:
-            boxsize = f.attrs.get('boxsize', 1.0)
-            mask = region.contains_data(data_slice, cell=is_cell, boxlen=boxsize)
-        else:
-            mask = None
 
         if shm_name is not None:
             shm = SharedMemory(name=shm_name)
             try:
                 target = np.ndarray((ndata_tot,), dtype=dtype_out, buffer=shm.buf)
-                if mask is not None:
-                    target[offset:offset + ndata] = data_slice[mask]
-                else:
-                    target[offset:offset + ndata] = data_slice
+                target[offset:offset + ndata] = data_slice
             finally:
-                # Worker should only close its handle, never unlink the shared memory.
                 shm.close()
         else:
-            # shared_arr is provided by the parent when not using SharedMemory
-            if mask is not None:
-                shared_arr[offset:offset + ndata] = data_slice[mask]
-            else:
-                shared_arr[offset:offset + ndata] = data_slice
+            shared_arr[offset:offset + ndata] = data_slice
 
 def _chunk_slice_hdf_mp(
     path,
     group_name,
-    chunk_indices,
-    chunk_sizes=1,
+    starts,
+    ends,
+    dtype_out,
+    target_fields,
     region: Region | None=None,
-    boundary_name="chunk_boundary",
-    target_fields=None,
     n_workers=None,
     mp_backend="process",
     copy_result=True,
     is_cell=False,
-    vname_set='native',
-    use_vname_mapping=True):
+    subsample=None):
     config = get_config()
 
     if n_workers is None:
         n_workers = config['DEFAULT_N_PROCS']
 
-    chunk_indices = np.asarray(chunk_indices)
-    if np.isscalar(chunk_sizes):
-        chunk_sizes = np.full_like(chunk_indices, int(chunk_sizes))
-    else:
-        chunk_sizes = np.asarray(chunk_sizes)
-
-    # Read only meta-info once in the parent
-    with h5py.File(path, "r") as f:
-        _, dtype_out, target_fields, starts, ends = _prepare_hdf_read(f, group_name, boundary_name, chunk_indices, chunk_sizes, target_fields, vname_set, use_vname_mapping)
+    starts = np.asarray(starts)
+    ends = np.asarray(ends)
 
     if region is not None:
-        # Compute exact sizes by filtering with region in parallel
+        # 1-pass: each worker reads, filters, and returns its chunk directly
         jobs = [
-            ((path, group_name, int(start), int(end), region, is_cell),)
+            ((path, group_name, target_fields, dtype_out, int(start), int(end), region, is_cell, subsample),)
             for start, end in zip(starts, ends)
         ]
-        ndata_per_chunk = np.array(run_mp_executor(_chunk_size_worker, jobs, backend=mp_backend, n_workers=n_workers, mp_method='submit'))
-    else:
-        ndata_per_chunk = ends - starts
+        chunks = run_mp_executor(_load_filter_worker, jobs, backend=mp_backend, n_workers=n_workers, mp_method='submit')
+        return np.concatenate(chunks) if chunks else np.empty(0, dtype=dtype_out)
+
+    ndata_per_chunk = ends - starts
     ndata_tot = int(np.sum(ndata_per_chunk))
 
     if ndata_tot == 0:
         return np.empty((0,), dtype=dtype_out)
 
-    # Pre-compute offsets so each worker writes to a unique region
     offsets = np.zeros_like(ndata_per_chunk)
     offsets[1:] = np.cumsum(ndata_per_chunk[:-1])
     offsets = offsets.astype(int)
 
-    # Allocate shared memory for the entire final array
     itemsize = dtype_out.itemsize
     total_bytes = ndata_tot * itemsize
 
@@ -293,20 +236,15 @@ def _chunk_slice_hdf_mp(
         shm = SharedMemory(create=True, size=total_bytes)
         try:
             shared_arr = np.ndarray((ndata_tot, ), dtype=dtype_out, buffer=shm.buf)
-
-            # Prepare worker job arguments
             jobs = [
-                ((path, group_name, target_fields, shm.name, None, ndata_tot, dtype_out, int(start), int(end), int(offset), int(ndata), region, is_cell),)
+                ((path, group_name, target_fields, shm.name, None, ndata_tot, dtype_out, int(start), int(end), int(offset), int(ndata)),)
                 for start, end, offset, ndata in zip(starts, ends, offsets, ndata_per_chunk)
                 if ndata > 0]
-
             run_mp_executor(_load_slice_worker, jobs, backend=mp_backend, n_workers=n_workers, mp_method='submit')
-
             if copy_result:
                 result = np.array(shared_arr, copy=True)
             else:
                 result = ArrayView(shm, (ndata_tot,), dtype_out)
-                
         finally:
             if copy_result:
                 try:
@@ -320,42 +258,13 @@ def _chunk_slice_hdf_mp(
     else:
         shared_arr = np.empty((ndata_tot,), dtype=dtype_out)
         jobs = [
-            ((path, group_name, target_fields, None, shared_arr, ndata_tot, dtype_out, int(start), int(end), int(offset), int(size), region, is_cell),)
+            ((path, group_name, target_fields, None, shared_arr, ndata_tot, dtype_out, int(start), int(end), int(offset), int(size)),)
             for start, end, offset, size in zip(starts, ends, offsets, ndata_per_chunk)
             if size > 0]
-        
         run_mp_executor(_load_slice_worker, jobs, backend=mp_backend, n_workers=n_workers, mp_method='submit')
-        result = shared_arr        
+        result = shared_arr
 
     return result
-
-def _chunk_slice_hdf(
-        path, 
-        group_name:str, 
-        chunk_indices, 
-        chunk_sizes=1,
-        region: Region | None=None,
-        boundary_name='chunk_boundary', 
-        target_fields=None,
-        is_cell=False,
-        vname_set='native',
-        use_vname_mapping=True) -> np.ndarray:
-
-    with h5py.File(path, 'r') as f:
-        data, dtype_out, target_fields, starts, ends = _prepare_hdf_read(f, group_name, boundary_name, chunk_indices, chunk_sizes, target_fields, vname_set, use_vname_mapping)
-
-        # Read and filter each chunk
-        boxsize = f.attrs.get('boxsize', 1.0)
-        output_list = []
-        for start, end in zip(starts, ends):
-            data_slice = data[start:end].view(dtype_out)
-            if region is not None:
-                mask = region.contains_data(data_slice, cell=is_cell, boxlen=boxsize)
-                data_slice = data_slice[mask]
-            output_list.append(data_slice)
-        output = np.concatenate(output_list)
-    return output
-
 
 def _prepare_hdf_read(f, group_name, boundary_name, chunk_indices, chunk_sizes, target_fields, vname_set, use_vname_mapping):
     vname_set_file = f.attrs.get('vname_set', 'native')
@@ -385,19 +294,20 @@ def _prepare_hdf_read(f, group_name, boundary_name, chunk_indices, chunk_sizes, 
 
 
 def read_hdf(
-        filename, 
-        name:str, 
-        region: Region | np.ndarray | list | None=None, 
-        target_fields=None, 
-        levelmax=None, 
-        levelmin=None,
-        exact_cut=True,
-        n_workers=None,
-        use_process=True,
-        copy_result=True,
-        is_cell=False,
-        vname_set=None,
-        use_vname_mapping=True) -> ArrayView:
+        filename: str, 
+        name: str, 
+        region: Region | np.ndarray | list | None = None, 
+        target_fields: list | None = None, 
+        levelmax: int | None = None,
+        levelmin: int | None = None,
+        exact_cut: bool = True,
+        n_workers: int | None = None,
+        use_process: bool = True,
+        copy_result: bool = True,
+        is_cell: bool = False,
+        vname_set: str | None = None,
+        use_vname_mapping: bool = True,
+        subsample: int = 1) -> ArrayView:
 
     config = get_config()
 
@@ -420,18 +330,20 @@ def read_hdf(
         for key in pos_keys:
             if key not in target_fields:
                 warn = True
-                target_fields = target_fields + [key]
+                target_fields = list(target_fields) + [key]
 
         vname_level = get_vname('level')
         if vname_level not in target_fields and is_cell:
             warn = True
-            target_fields = target_fields + [vname_level]
+            target_fields = list(target_fields) + [vname_level]
 
         if warn:
             warnings.warn("Exact cut with region specified requires position fields to be loaded. They have been added to target_fields.")
 
     if isinstance(region, np.ndarray) or isinstance(region, list):
         region = Box(region)
+
+    region_cut = region if exact_cut else None
 
     with h5py.File(filename, 'r') as f:
         info = read_info_from_hdf(f)
@@ -458,39 +370,60 @@ def read_hdf(
             chunk_sizes = levelmax - levelmin + 1
         else:
             chunk_sizes = 1
-    
-    timer.message(f"Total number of chunks to read: {len(chunk_indices)} / {nchunks}.")
 
-    if n_workers == 1:
-        if not exact_cut:
-            region = None
-        result = _chunk_slice_hdf(filename, name, chunk_indices, chunk_sizes=chunk_sizes, region=region, target_fields=target_fields, is_cell=is_cell, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
-    else:
-        if not exact_cut:
-            region = None
-        result = _chunk_slice_hdf_mp(filename, name, chunk_indices, chunk_sizes=chunk_sizes, region=region, target_fields=target_fields, n_workers=n_workers, mp_backend=mp_backend, copy_result=copy_result, is_cell=is_cell, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
+        timer.message(f"Total number of chunks to read: {len(chunk_indices)} / {nchunks}.")
+
+        data, dtype_out, target_fields_native, starts, ends = _prepare_hdf_read(
+            f, name, 'chunk_boundary', chunk_indices, chunk_sizes,
+            target_fields, vname_set, use_vname_mapping)
+        boxsize = f.attrs.get('boxsize', 1.0)
+
+        if n_workers == 1:
+            if region_cut is None:
+                # zero-copy path: pre-allocate and fill in-place
+                ndata_per_chunk = ends - starts
+                ndata_tot = int(np.sum(ndata_per_chunk))
+                result = np.empty(ndata_tot, dtype=dtype_out)
+                offset = 0
+                for start, end, ndata in zip(starts, ends, ndata_per_chunk):
+                    result[offset:offset + ndata] = data[start:end].view(dtype_out)
+                    offset += ndata
+            else:
+                output_list = []
+                for start, end in zip(starts, ends):
+                    data_slice = data[start:end:subsample].view(dtype_out)
+                    mask = region_cut.contains_data(data_slice, cell=is_cell, boxlen=boxsize)
+                    output_list.append(data_slice[mask])
+                result = np.concatenate(output_list) if output_list else np.empty(0, dtype=dtype_out)
+
+    if n_workers > 1:
+        result = _chunk_slice_hdf_mp(
+            filename, name, starts, ends, dtype_out, target_fields_native,
+            region=region_cut, n_workers=n_workers, mp_backend=mp_backend,
+            copy_result=copy_result, is_cell=is_cell, subsample=subsample)
 
     timer.record(f"Finished reading HDF5 data from {filename}. Found {len(result)} items.")
     if isinstance(result, ArrayView):
         result.info = info
     else:
         result = ArrayView(result, info=info)
-    
+
     return result
 
 
 def read_part(
         path: str,
-        part_type: str,
         iout: int | None=None,
         region: Region | np.ndarray | list | None=None,
         target_fields=None,
+        part_type: str | None=None,
         exact_cut=True,
         n_workers=None,
         use_process=True,
         copy_result=True,
         vname_set=None,
-        use_vname_mapping=True) -> ArrayView:
+        use_vname_mapping=True,
+        subsample=1) -> ArrayView:
     """
     Read particle data from HDF5 file.
 
@@ -498,28 +431,32 @@ def read_part(
     ----------
     path : str
         Path to the directory containing HDF5 files or full file path if iout is None.
-    part_type : str
-        Type of particles to read (e.g., 'dark_matter', 'star', etc.).
     iout : int, optional
         Output number to construct the filename. If None, `path` is treated as the full filename.
     region : Region or array-like, optional
         Region to filter particles. If None, all particles are read.
     target_fields : list, optional
         List of fields to read. If None, all fields are read.
+    part_type : str, optional
+        Type of particles to read (e.g., 'star', 'dm', etc.). If None, all particle types
+        found in the file are read and concatenated. When types have different fields, only
+        the common fields are kept.
     exact_cut : bool, optional
-        Whether to apply exact cut based on the region. Defaults to True. If False, all particles in the chunks overlapping the region are read.
+        Whether to apply exact cut based on the region. Defaults to True.
     n_workers : int, optional
         Number of parallel workers to use. Defaults to config['DEFAULT_N_PROCS'].
     use_process : bool, optional
-        Whether to use process-based parallelism. Defaults to True. If False, thread-based parallelism is used.
+        Whether to use process-based parallelism. Defaults to True.
     copy_result : bool, optional
-        Whether to return a copy of the result array. Defaults to True. If False, a shared memory view is returned when using multiple processes.
+        Whether to return a copy of the result array. Defaults to True.
     use_vname_mapping : bool, optional
-        Whether to apply variable name mapping. Defaults to True. If False, variable names stored in the file are used directly.
-    
+        Whether to apply variable name mapping. Defaults to True.
+    subsample : int, optional
+        Subsampling factor to apply when reading data. If >1, only every nth cell is read. Defaults to 1 (no subsampling).
+
     Returns
     -------
-    np.ndarray
+    ArrayView
         Array of particle data.
     """
 
@@ -535,9 +472,33 @@ def read_part(
         filename = path
     else:
         filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data='part', iout=iout))
-    data = read_hdf(filename, part_type, region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=False, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
 
-    return data
+    if part_type is None:
+        with h5py.File(filename, 'r') as f:
+            info = read_info_from_hdf(f)
+            part_types = [k for k, v in f.items() if isinstance(v, h5py.Group) and 'n_chunk' in v.attrs]
+        if not part_types:
+            return ArrayView(np.empty(0, dtype=np.float64), info=info)
+        arrays = [
+            read_hdf(filename, pt, region=region, target_fields=target_fields, exact_cut=exact_cut,
+                     n_workers=n_workers, use_process=use_process, copy_result=copy_result,
+                     is_cell=False, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
+            for pt in part_types
+        ]
+        dtypes = [a.dtype for a in arrays]
+        if len(set(dtypes)) == 1:
+            return ArrayView(np.concatenate(arrays), info=info)
+        common = [f for f in dtypes[0].names if all(f in dt.names for dt in dtypes[1:])]
+        common_dtype = np.dtype([(f, dtypes[0][f]) for f in common])
+        parts = []
+        for arr in arrays:
+            out = np.empty(len(arr), dtype=common_dtype)
+            for f in common:
+                out[f] = arr[f]
+            parts.append(out)
+        return ArrayView(np.concatenate(parts), info=info)
+
+    return read_hdf(filename, part_type, region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=False, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
 
 
 def read_cell(
@@ -552,7 +513,8 @@ def read_cell(
         copy_result=True,
         read_branch=False,
         vname_set=None,
-        use_vname_mapping=True) -> ArrayView:
+        use_vname_mapping=True,
+        subsample=1) -> ArrayView:
     """
     Read cell data from HDF5 file.
 
@@ -580,6 +542,8 @@ def read_cell(
         Whether to read branch cells instead of leaf cells. Defaults to False.
     use_vname_mapping : bool, optional
         Whether to apply variable name mapping. Defaults to True. If False, variable names stored in the file are used directly.
+    subsample : int, optional
+        Subsampling factor to apply when reading data. If >1, only every nth cell is read. Defaults to 1 (no subsampling).
 
     Returns
     -------
@@ -600,13 +564,13 @@ def read_cell(
     else:
         filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data='cell', iout=iout))
     if levelmax_load is not None:
-        data_leaf = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmax=levelmax_load, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
-        data_branch = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmin=levelmax_load, levelmax=levelmax_load, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
+        data_leaf = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmax=levelmax_load, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
+        data_branch = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmin=levelmax_load, levelmax=levelmax_load, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
         data = np.concatenate([data_leaf, data_branch])
     elif read_branch:
-        data = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
+        data = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
     else:
-        data = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
+        data = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
     return data
 
 
@@ -625,10 +589,10 @@ def _generate_part_reader(part_type: str):
     ):
         return read_part(
             path,
-            part_type,
             iout=iout,
             region=region,
             target_fields=target_fields,
+            part_type=part_type,
             exact_cut=exact_cut,
             n_workers=n_workers,
             use_process=use_process,

@@ -1,7 +1,9 @@
 import os
 import pickle as pkl
 
-from . import get_config, get_vname, timer, format_bytes
+from .config_module import get_vname
+
+from . import get_config, timer, format_bytes
 from . import ramses
 from .utils.fortranfile import FortranFile
 import numpy as np

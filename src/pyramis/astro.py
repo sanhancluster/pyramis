@@ -1,5 +1,6 @@
 import numpy as np
-from . import config, cgs_unit, cgs_constants, get_vname
+from .config_module import get_vname
+from . import cgs_unit, cgs_constants
 from scipy.integrate import cumulative_trapezoid
 import re
 
@@ -63,7 +64,7 @@ def get_age(data, info):
     t0 = cosmo_convert(info['cosmo_table'], data[get_vname('birth_time')], 't_sc', 'age')
     aexp = info['aexp']
     t = cosmo_convert(info['cosmo_table'], aexp, 'aexp', 'age')
-    age = t - t0
+    age = (t - t0) / info['unit_t']
     return age
 
 

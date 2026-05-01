@@ -3,7 +3,9 @@ import pyramis as pyr
 import h5py
 import argparse
 import time
-from pyramis.utils import Timestamp, ArrayView
+from pyramis.config_module import get_vname
+from pyramis.utils import Timestamp
+from pyramis.utils.arrayview import ArrayView
 import os
 
 pyr.set_config('VNAME_SET', 'native')
@@ -24,29 +26,29 @@ def export_hdf(repo: str, output_path='SINKPROPS/sinkprops.h5', h5py_kwargs=None
     timer.record("Finished reading sink properties from RAMSES snapshots")
 
     timer.start("Processing sink properties")
-    icoarses, indices, counts = np.unique(sp[pyr.get_vname('icoarse')], return_index=True, return_counts=True)
-    steps = np.empty(len(icoarses), dtype=[(pyr.get_vname('icoarse'), 'i4'), (pyr.get_vname('aexp'), 'f8'), (pyr.get_vname('unit_l'), 'f4'), (pyr.get_vname('unit_d'), 'f4'), (pyr.get_vname('unit_t'), 'f4'), (pyr.get_vname('num'), 'i4'), (pyr.get_vname('offset'), 'i4')])
+    icoarses, indices, counts = np.unique(sp[get_vname('icoarse')], return_index=True, return_counts=True)
+    steps = np.empty(len(icoarses), dtype=[(get_vname('icoarse'), 'i4'), (get_vname('aexp'), 'f8'), (get_vname('unit_l'), 'f4'), (get_vname('unit_d'), 'f4'), (get_vname('unit_t'), 'f4'), (get_vname('num'), 'i4'), (get_vname('offset'), 'i4')])
 
     for name in ['icoarse', 'aexp', 'unit_l', 'unit_d', 'unit_t']:
-        steps[pyr.get_vname(name)] = sp[indices][pyr.get_vname(name)]
-    steps[pyr.get_vname('num')] = counts
-    steps[pyr.get_vname('offset')] = indices
+        steps[get_vname(name)] = sp[indices][get_vname(name)]
+    steps[get_vname('num')] = counts
+    steps[get_vname('offset')] = indices
     # sort the data by id
-    id_key = np.argsort(sp, order=[pyr.get_vname('identity'), pyr.get_vname('icoarse')], kind='stable')
+    id_key = np.argsort(sp, order=[get_vname('identity'), get_vname('icoarse')], kind='stable')
     sp = sp[id_key]
     icoarse_key = np.argsort(id_key)
 
-    ids, indices, counts = np.unique(sp[pyr.get_vname('identity')], return_index=True, return_counts=True)
-    sinks = np.empty(len(ids), dtype=[(pyr.get_vname('identity'), 'i4'), (pyr.get_vname('num'), 'i4'), (pyr.get_vname('offset'), 'i4'), (pyr.get_vname('icoarse_min'), 'i4'), (pyr.get_vname('icoarse_max'), 'i4')])
-    sinks[pyr.get_vname('identity')] = ids
-    sinks[pyr.get_vname('num')] = counts
-    sinks[pyr.get_vname('offset')] = indices
-    sinks[pyr.get_vname('icoarse_min')] = np.array([sp[i:i+n][pyr.get_vname('icoarse')].min() for i, n in zip(indices, counts)])
-    sinks[pyr.get_vname('icoarse_max')] = np.array([sp[i:i+n][pyr.get_vname('icoarse')].max() for i, n in zip(indices, counts)])
+    ids, indices, counts = np.unique(sp[get_vname('identity')], return_index=True, return_counts=True)
+    sinks = np.empty(len(ids), dtype=[(get_vname('identity'), 'i4'), (get_vname('num'), 'i4'), (get_vname('offset'), 'i4'), (get_vname('icoarse_min'), 'i4'), (get_vname('icoarse_max'), 'i4')])
+    sinks[get_vname('identity')] = ids
+    sinks[get_vname('num')] = counts
+    sinks[get_vname('offset')] = indices
+    sinks[get_vname('icoarse_min')] = np.array([sp[i:i+n][get_vname('icoarse')].min() for i, n in zip(indices, counts)])
+    sinks[get_vname('icoarse_max')] = np.array([sp[i:i+n][get_vname('icoarse')].max() for i, n in zip(indices, counts)])
 
     descr_new = []
     for name in sp.dtype.names:
-        if name in [pyr.get_vname('aexp'), pyr.get_vname('position_x'), pyr.get_vname('position_y'), pyr.get_vname('position_z')]:
+        if name in [get_vname('aexp'), get_vname('position_x'), get_vname('position_y'), get_vname('position_z')]:
             descr_new.append((name, 'f8'))
         else:
             descr_new.append((name, sp.dtype.fields[name][0]))
@@ -73,8 +75,8 @@ def export_hdf(repo: str, output_path='SINKPROPS/sinkprops.h5', h5py_kwargs=None
         f.attrs['n_sink'] = len(sinks)
         f.attrs['n_data'] = len(sp)
 
-        f.attrs[f"{pyr.get_vname('icoarse')}_max"] = np.max(steps[pyr.get_vname('icoarse')])
-        f.attrs[f"{pyr.get_vname('identity')}_max"] = np.max(sinks[pyr.get_vname('identity')])
+        f.attrs[f"{get_vname('icoarse')}_max"] = np.max(steps[get_vname('icoarse')])
+        f.attrs[f"{get_vname('identity')}_max"] = np.max(sinks[get_vname('identity')])
 
         if info is not None:
             for key, value in info.items():

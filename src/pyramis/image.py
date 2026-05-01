@@ -6,6 +6,10 @@ import warnings
 from . import uniform_digitize, get_dim_keys
 from .geometry import Box
 
+from scipy.spatial import Voronoi, Delaunay
+from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
+from scipy.sparse import csr_matrix
+
 def get_projection_index(projection=None, ndim=3, dim_keys=None):
     """
     Get the projection index for the given projection axes.
@@ -91,9 +95,9 @@ def grid_projection(
     levels : np.ndarray, optional
         Array of shape (N,) containing the refinement levels of the cells. Required for AMR data.
     quantities : np.ndarray, optional
-        Array of shape (N,) containing the quantity values to be projected. Default is None.
+        Array of shape (N,) or (N, K) containing the quantity values to be projected. Default is None.
     weights : np.ndarray, optional
-        Array of shape (N,) containing the weights for each cell or particle. If None, all weights are set to 1. Default is None.
+        Array of shape (N,) or (N, K) containing the weights for each cell or particle. If None, all weights are set to 1. Default is None.
     shape : int or tuple of int, optional
         Shape of the output grid. If an integer is provided, it is used for both dimensions. Default is None.
     lims : list of list of float, optional
@@ -128,28 +132,43 @@ def grid_projection(
         2D array representing the projected quantity.
     """
     def apply_projection(grid, grid_weight, x, y, quantity, weights, lims_2d, projector, mode='sum'):
-        shape = grid.shape
+        vector = quantity.ndim == 2
+        shape = grid.shape[:2] if vector else grid.shape
+        K = quantity.shape[1] if vector else 1
         if mode in ['sum', 'mean']:
-            # do a weighted sum over projection
-            grid += projector(x, y, quantity*weights, lims_2d, shape)
-            if mode in ['mean']:
-                grid_weight += projector(x, y, weights, lims_2d, shape)
+            if vector:
+                # projector returns (H,W,K) when weights is (N,K)
+                grid += projector(x, y, quantity * weights, lims_2d, shape)
+                if mode == 'mean':
+                    grid_weight += projector(x, y, weights, lims_2d, shape)
+            else:
+                grid += projector(x, y, quantity * weights, lims_2d, shape)
+                if mode == 'mean':
+                    grid_weight += projector(x, y, weights, lims_2d, shape)
         elif mode in ['min', 'max']:
             xi = uniform_digitize(x, lims_2d[0], shape[0])
             yi = uniform_digitize(y, lims_2d[1], shape[1])
+            fill = np.inf if mode == 'min' else -np.inf
+            if vector:
+                for k in range(K):
+                    grid_padding = np.full(np.asarray(shape) + 2, fill_value=fill, dtype=output_dtype)
+                    if mode == 'min':
+                        np.minimum.at(grid_padding, (xi, yi), quantity[:, k])
+                        np.minimum(grid[:, :, k], grid_padding[1:-1, 1:-1], out=grid[:, :, k])
+                    else:
+                        np.maximum.at(grid_padding, (xi, yi), quantity[:, k])
+                        np.maximum(grid[:, :, k], grid_padding[1:-1, 1:-1], out=grid[:, :, k])
+            else:
+                # add 1 pixel padding to bin out of range values
+                grid_padding = np.full(np.asarray(shape) + 2, fill_value=fill, dtype=output_dtype)
+                if mode == 'min':
+                    np.minimum.at(grid_padding, (xi, yi), quantity)
+                    np.minimum(grid, grid_padding[1:-1, 1:-1], out=grid)
+                else:
+                    np.maximum.at(grid_padding, (xi, yi), quantity)
+                    np.maximum(grid, grid_padding[1:-1, 1:-1], out=grid)
 
-            # add 1 pixel padding to bin out of range values
-            grid_padding = np.full(np.asarray(shape)+2, fill_value=np.inf if mode == 'min' else -np.inf, dtype=output_dtype)
-            if mode in ['min']:
-                # do a minimum over projection
-                np.minimum.at(grid_padding, (xi, yi), quantity)
-                np.minimum(grid, grid_padding[1:-1, 1:-1], out=grid)
-            elif mode in ['max']:
-                # do a maximum over projection
-                np.maximum.at(grid_padding, (xi, yi), quantity)
-                np.maximum(grid, grid_padding[1:-1, 1:-1], out=grid)
-
-    ndim_data = 3
+    ndim_data = centers.shape[1]
     ndim_proj = 2
     levelmin, levelmax = None, None
 
@@ -159,17 +178,19 @@ def grid_projection(
     # get the projection index for the given projection axes
     proj = get_projection_index(projection, ndim=ndim_data)    
     # get the z-axis that is not in the projection
-    proj_z = np.setdiff1d(np.arange(ndim_data), proj)[0]
+    if ndim_data == 3:
+        proj_z = np.setdiff1d(np.arange(ndim_data), proj)[0]
+    else:
+        proj_z = None
     
     if coarse_bins is None:
-        coarse_bins = np.array([1, 1, 1])
+        coarse_bins = np.array([1,] * ndim_data)
     elif np.isscalar(coarse_bins):
-        coarse_bins = np.repeat(coarse_bins, 3)
+        coarse_bins = np.repeat(coarse_bins, ndim_data)
     else:
         coarse_bins = np.asarray(coarse_bins)
-        if coarse_bins.shape != (3,):
-            raise ValueError("coarse_bins must be a scalar or an array of shape (3,)")
-
+        if coarse_bins.shape != (ndim_data,):
+            raise ValueError(f"coarse_bins must be a scalar or an array of shape ({ndim_data},)")
     # if lims is None, set all limits to [0, 1]
     if isinstance(lims, Box):
         region = lims
@@ -192,9 +213,27 @@ def grid_projection(
     # if quantities is None, set all quantities to 1
     if quantities is None:
         quantities = np.ones(centers.shape[0])
+    else:
+        quantities = np.asarray(quantities)
     # if weights is None, set all weights to 1
     if weights is None:
         weights = np.ones_like(quantities)
+    else:
+        weights = np.asarray(weights)
+
+    # detect vector mode: quantities or weights have shape (N, K)
+    vector_mode = quantities.ndim == 2 or weights.ndim == 2
+    if vector_mode:
+        if quantities.ndim == 1:
+            quantities = quantities[:, np.newaxis]
+        if weights.ndim == 1:
+            weights = weights[:, np.newaxis]
+        n_channels = max(quantities.shape[1], weights.shape[1])
+        quantities = np.broadcast_to(quantities, (quantities.shape[0], n_channels))
+        weights = np.broadcast_to(weights, (weights.shape[0], n_channels))
+    else:
+        n_channels = 1
+
     # if shape is scalar, make it a tuple
     if isinstance(shape, int):
         shape = tuple(np.repeat(shape, 2))
@@ -298,9 +337,10 @@ def grid_projection(
         raise ValueError("Unknown type: %s. Supported types are 'part' and 'amr'." % type)
 
     # initialize grid and grid_weight
-    grid = np.full(shape_grid, fill_value, dtype=output_dtype)
+    grid_shape = (*shape_grid, n_channels) if vector_mode else shape_grid
+    grid = np.full(grid_shape, fill_value, dtype=output_dtype)
     if mode in ['mean']:
-        grid_weight = np.zeros(shape_grid, dtype=output_dtype)
+        grid_weight = np.zeros(grid_shape, dtype=output_dtype)
     else:
         grid_weight = None
 
@@ -311,7 +351,7 @@ def grid_projection(
 
     # get the projected coordinates
     xx, yy = cc[:, proj[0]], cc[:, proj[1]]
-    zz = cc[:, proj_z]
+    zz = cc[:, proj_z] if ndim_data == 3 else None
 
     # set the projector lambda based on the plot method
     projector = lambda x, y, w, lims, shape: density_2d(x, y, lims=lims, weights=w, shape=shape, density=False, method=plot_method, **projector_kwargs)
@@ -331,39 +371,56 @@ def grid_projection(
     elif type == 'amr' and levelmin is not None and levelmax is not None:
         for grid_level in range(levelmin, levelmax+1):
             mask_level = ll == grid_level
-            shape_now = grid.shape
-            x, y, z, q = xx[mask_level], yy[mask_level], zz[mask_level], qq[mask_level]
+            x, y, q = xx[mask_level], yy[mask_level], qq[mask_level]
+            if ndim_data == 3:
+                z = zz[mask_level]
 
             volume_weight = 1
             # get weight for the current level with depending on the line-of-sight depth within the limit.
             # e.g., the weight is 0.5 if the z-coordinate is in the middle of any z-limits 
-            volume_weight += np.clip((z - lims[proj_z][0]) * 2**grid_level - 0.5, -1, 0) + np.clip((lims[proj_z][1] - z) * 2**grid_level - 0.5, -1, 0)
+            if ndim_data == 3:
+                volume_weight += np.clip((z - lims[proj_z][0]) * 2**grid_level - 0.5, -1, 0) + np.clip((lims[proj_z][1] - z) * 2**grid_level - 0.5, -1, 0)
             # multiply the weight by the depth of the projected grid. The weight is doubled per each decreasing level except for the levels larger than the grid resolution.
             volume_weight *= 0.5**grid_level
             # give additional weight to the projection if cell is smaller than the grid resolution
             volume_weight *= 0.25**np.maximum(0, grid_level - levelmax_draw)
-            w = ww[mask_level] * volume_weight
+            # broadcast volume_weight (N_level,) against weights (N_level, K) in vector mode
+            vw = volume_weight[:, np.newaxis] if vector_mode else volume_weight
+            w = ww[mask_level] * vw
 
             # do projection onto current level grid
             apply_projection(grid=grid, grid_weight=grid_weight, x=x, y=y, quantity=q, weights=w, lims_2d=lims_2d_draw, projector=projector, mode=mode)
 
             # increase grid size if necessary
             if grid_level >= levelmin_draw and grid_level < levelmax_draw:
-                grid = rescale(grid, 2, order=interp_order)
-                if mode in ['mean']:
-                    grid_weight = rescale(grid_weight, 2, order=interp_order)
+                if vector_mode:
+                    grid = np.stack([rescale(grid[:, :, k], 2, order=interp_order) for k in range(n_channels)], axis=-1)
+                    if mode in ['mean']:
+                        grid_weight = np.stack([rescale(grid_weight[:, :, k], 2, order=interp_order) for k in range(n_channels)], axis=-1)
+                else:
+                    grid = rescale(grid, 2, order=interp_order)
+                    if mode in ['mean']:
+                        grid_weight = rescale(grid_weight, 2, order=interp_order)
 
         if mode == 'mean' and grid_weight is not None:
             grid /= grid_weight
         # resize and crop image to the desired shape
         if shape is not None:
             if crop_mode == 'grid':
-                grid = resize(grid, output_shape=shape, order=interp_order)
+                if vector_mode:
+                    grid = np.stack([resize(grid[:, :, k], output_shape=shape, order=interp_order) for k in range(n_channels)], axis=-1)
+                else:
+                    grid = resize(grid, output_shape=shape, order=interp_order)
             elif crop_mode in ['pixel', 'subpixel']:
                 subpixel = crop_mode == 'subpixel'
                 lims_crop = (lims_2d - lims_2d_draw[:, 0, np.newaxis]) / (lims_2d_draw[:, 1] - lims_2d_draw[:, 0])[:, np.newaxis]
-                grid = crop(grid, range=lims_crop, output_shape=shape, subpixel=subpixel, order=interp_order)
+                if vector_mode:
+                    grid = np.stack([crop(grid[:, :, k], range=lims_crop, output_shape=shape, subpixel=subpixel, order=interp_order) for k in range(n_channels)], axis=-1)
+                else:
+                    grid = crop(grid, range=lims_crop, output_shape=shape, subpixel=subpixel, order=interp_order)
 
+    if vector_mode:
+        return grid
     return grid.T
 
 
@@ -469,13 +526,15 @@ def density_2d(x, y, lims, shape=100, weights=None, density=False, method='hist'
     elif method == 'cic':
         return cic_2d(x, y, range_array, shape_array, weights=weights, density=density, **kwargs)
     elif method == 'hist_numpy':
-        im = np.histogram2d(x, y, range=range_array, bins=shape_array, weights=weights, **kwargs)[0]
+        im = np.histogram2d(x, y, range=range_array, bins=shape_array.tolist(), weights=weights, **kwargs)[0]
         if density:
             area_per_px = (range_array[0, 1] - range_array[0, 0]) * (range_array[1, 1] - range_array[1, 0]) / im.size
             im /= area_per_px
         return im
+    elif method == 'dtfe':
+        return dtfe_2d(x, y, range_array, shape_array, weights=weights, density=density, **kwargs)
     else:
-        raise ValueError("Unknown mode: %s. Use 'hist', 'kde', 'cic', 'gaussian', or 'dtfe'." % method)
+        raise ValueError("Unknown mode: %s. Use 'hist', 'kde', 'cic', 'gaussian', 'dtfe', or 'voronoi'." % method)
 
 
 def hist_2d(x, y, lims, shape:int | np.ndarray | Sequence[int]=100, weights=None, density=False):
@@ -511,13 +570,20 @@ def hist_2d(x, y, lims, shape:int | np.ndarray | Sequence[int]=100, weights=None
 
     xi = uniform_digitize(x, lims[0], shape_array[0])
     yi = uniform_digitize(y, lims[1], shape_array[1])
-
     flat_indices = xi * shape_pad[1] + yi
-    accum = np.bincount(flat_indices, weights=weights, minlength=shape_pad[0] * shape_pad[1])
-    pool = accum.reshape(shape_pad)[1:-1, 1:-1]
-    
+    size = int(shape_pad[0] * shape_pad[1])
+
+    if weights.ndim == 2:
+        K = weights.shape[1]
+        accum = np.empty((size, K), dtype=np.float64)
+        for k in range(K):
+            accum[:, k] = np.bincount(flat_indices, weights=weights[:, k], minlength=size)
+        pool = accum.reshape(int(shape_pad[0]), int(shape_pad[1]), K)[1:-1, 1:-1, :]
+    else:
+        pool = np.bincount(flat_indices, weights=weights, minlength=size).reshape(shape_pad)[1:-1, 1:-1]
+
     if density:
-        area_per_px = (lims[0][1] - lims[0][0]) * (lims[1][1] - lims[1][0]) / pool.size
+        area_per_px = (lims[0][1] - lims[0][0]) * (lims[1][1] - lims[1][0]) / (shape_array[0] * shape_array[1])
         pool /= area_per_px
 
     return pool
@@ -574,20 +640,36 @@ def cic_2d(x, y, lims, shape:int | np.ndarray | Sequence[int]=100, weights=None,
     # Create zero array for accumulation
     dxs = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
 
-    if not full_vectorize:
-        pool = np.zeros(shape_array, dtype='f8')
-        for dx in dxs:
-            indices_int = np.floor(indices_float - dx).astype(np.int32)
-            offsets = indices_float - indices_int
-            areas = (1 - np.abs(offsets[:, 0] - 1)) * (1 - np.abs(offsets[:, 1] - 1))
-            values = areas * weights
+    vector = weights.ndim == 2
+    size = int(shape_pad[0] * shape_pad[1])
 
-            indices_int += 1  # padding offset
-            flat_indices = indices_int[:, 0] * shape_pad[1] + indices_int[:, 1]
-            accum = np.bincount(flat_indices, weights=values, minlength=shape_pad[0] * shape_pad[1])
-            pool += accum.reshape(shape_pad)[1:-1, 1:-1]
+    if not full_vectorize:
+        if vector:
+            K = weights.shape[1]
+            pool = np.zeros((*shape_array, K), dtype='f8')
+            for dx in dxs:
+                indices_int = np.floor(indices_float - dx).astype(np.int32)
+                offsets = indices_float - indices_int
+                areas = (1 - np.abs(offsets[:, 0] - 1)) * (1 - np.abs(offsets[:, 1] - 1))  # (N,)
+                indices_int += 1
+                flat_indices = indices_int[:, 0] * shape_pad[1] + indices_int[:, 1]
+                for k in range(K):
+                    accum = np.bincount(flat_indices, weights=areas * weights[:, k], minlength=size)
+                    pool[:, :, k] += accum.reshape(shape_pad)[1:-1, 1:-1]
+        else:
+            pool = np.zeros(shape_array, dtype='f8')
+            for dx in dxs:
+                indices_int = np.floor(indices_float - dx).astype(np.int32)
+                offsets = indices_float - indices_int
+                areas = (1 - np.abs(offsets[:, 0] - 1)) * (1 - np.abs(offsets[:, 1] - 1))
+                values = areas * weights
+
+                indices_int += 1  # padding offset
+                flat_indices = indices_int[:, 0] * shape_pad[1] + indices_int[:, 1]
+                accum = np.bincount(flat_indices, weights=values, minlength=size)
+                pool += accum.reshape(shape_pad)[1:-1, 1:-1]
     else:
-        # full vectorization: memory-intensive
+        # full vectorization: memory-intensive (scalar weights only)
         indices_int = np.floor(indices_float[None, :, :] - dxs[:, None, :]).astype(np.int32)
         offsets = indices_float[None, :, :] - indices_int
         areas = (1 - np.abs(offsets[..., 0] - 1)) * (1 - np.abs(offsets[..., 1] - 1))
@@ -595,11 +677,97 @@ def cic_2d(x, y, lims, shape:int | np.ndarray | Sequence[int]=100, weights=None,
 
         indices_int += 1
         flat_indices = (indices_int[..., 0] * shape_pad[1] + indices_int[..., 1]).reshape(-1)
-        accum = np.bincount(flat_indices, weights=values, minlength=shape_pad[0] * shape_pad[1])
+        accum = np.bincount(flat_indices, weights=values, minlength=size)
         pool = accum.reshape(shape_pad)[1:-1, 1:-1]
-    
+
     if density:
-        area_per_px = (range_array[0, 1] - range_array[0, 0]) * (range_array[1, 1] - range_array[1, 0]) / pool.size
+        area_per_px = (range_array[0, 1] - range_array[0, 0]) * (range_array[1, 1] - range_array[1, 0]) / (shape_array[0] * shape_array[1])
         pool /= area_per_px
 
     return pool
+
+
+
+def dtfe_2d(x, y, lims, shape: int | np.ndarray | Sequence[int] = 100, weights=None, density=False, smooth=0, interpolator='linear'):
+    """
+    Create a 2D image using Delaunay triangulation and area-based density estimation.
+    This method computes the density of points in a 2D space by triangulating the points
+    and calculating the area of the triangles formed. The density is then interpolated
+    onto a grid defined by the specified limits and resolution.
+    """
+    if np.isscalar(shape):
+        shape = np.repeat(shape, 2)
+    lims = np.asarray(lims)
+    shape_array = np.asarray(shape, dtype=int)
+
+    x = np.asarray(x)
+    y = np.asarray(y)
+
+    if weights is None:
+        weights = np.ones_like(x)
+    else:
+        weights = np.asarray(weights)
+
+    # set up shapes and ranges
+    range_array = np.array(lims)
+    shape_array = np.array(shape)
+
+    points = np.stack([x, y], axis=-1)
+    center = np.median(points, axis=0)
+    n_points = points.shape[0]
+
+    if(smooth is None):
+        smooth = int(0.05 * n_points**0.6)
+
+    # For some "Complex Geometrical Reasons", Qhull does not work properly without options???
+    # Even with blank option, the result is different.
+    tri = Delaunay(points-center, qhull_options='Qbb Qc Qx')
+    
+    simplices = tri.simplices
+    vertices = points[simplices]
+        
+    v1 = vertices[:, 1] - vertices[:, 0]
+    v2 = vertices[:, 2] - vertices[:, 0]
+    tri_areas = 0.5 * np.abs(v1[:, 0] * v2[:, 1] - v1[:, 1] * v2[:, 0])
+
+    flat_simplices = simplices.reshape(-1)
+    area_repeat = np.repeat(tri_areas, 3)
+    hull_areas = np.bincount(flat_simplices, weights=area_repeat, minlength=n_points) / 3
+
+    if(smooth>0):
+        indptr, neighbor_indices = tri.vertex_neighbor_vertices
+        rows = np.repeat(np.arange(n_points), np.diff(indptr))
+        cols = neighbor_indices
+        data = np.ones_like(cols, dtype=np.float64)
+
+        neighbor_nums = np.bincount(rows, minlength=n_points)
+        data = data / neighbor_nums[rows]
+
+        W = csr_matrix((data, (rows, cols)), shape=(n_points, n_points))
+
+        for _ in range(smooth):
+            hull_areas = (hull_areas + W @ hull_areas) / 2
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+        densities = 1 / hull_areas
+
+    if(weights is not None):
+        densities *= weights
+
+    x_centers = lims[0, 0] + (np.arange(shape_array[0]) + 0.5) * (lims[0, 1] - lims[0, 0]) / shape_array[0]
+    y_centers = lims[1, 0] + (np.arange(shape_array[1]) + 0.5) * (lims[1, 1] - lims[1, 0]) / shape_array[1]
+
+    xm, ym = np.meshgrid(x_centers, y_centers, indexing='ij')
+
+    if interpolator == 'nearest':
+        ip = NearestNDInterpolator(points, densities)
+    elif interpolator == 'linear':
+        ip = LinearNDInterpolator(points, densities)
+    grid = ip(xm, ym).T
+    grid = np.nan_to_num(grid, nan=0.0)
+
+    if not density:
+        area_per_px = (range_array[0, 1] - range_array[0, 0]) * (range_array[1, 1] - range_array[1, 0]) / grid.size
+        grid *= area_per_px
+
+    return grid.T

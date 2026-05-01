@@ -3,8 +3,10 @@ from multiprocessing.shared_memory import SharedMemory
 
 import numpy as np
 from typing import Optional
+
+from ..config_module import get_vname
 from . import in_jupyter
-from .. import get_vname, get_unit, get_position, get_velocity, get_cell_size, get_mass
+from .. import get_unit, get_position, get_velocity, get_cell_size, get_mass
 from ..astro import get_age, get_temperature
 
 
@@ -14,12 +16,12 @@ def get_field(data: np.ndarray, info: dict, field_name: str, unit: str | None=No
     """
     vname = get_vname(field_name)
     if vname in data.dtype.names:
-        return data[vname]
+        out = data[vname]
     else:
         if field_name == 'position':
-            out = get_position(data)
+            out = get_position(data, axis=-1, ndim=info.get('ndim', 3))
         elif field_name == 'velocity':
-            out = get_velocity(data)
+            out = get_velocity(data, axis=-1, ndim=info.get('ndim', 3))
         elif field_name == 'cell_size':
             out = get_cell_size(data, boxlen=info.get('boxlen', 1.0))
         elif field_name == 'mass':
@@ -31,13 +33,13 @@ def get_field(data: np.ndarray, info: dict, field_name: str, unit: str | None=No
         else:
             raise ValueError(f"Field '{field_name}' not found in data and is not a recognized custom field.")
 
-        if unit is not None:
-            if aexp is None and get_vname('aexp') in data.dtype.names:
-                aexp = data[get_vname('aexp')]
-            factor = get_unit(unit, info, aexp=aexp)
-            out = out / factor
+    if unit is not None:
+        if aexp is None and get_vname('aexp') in data.dtype.names:
+            aexp = data[get_vname('aexp')]
+        factor = get_unit(unit, info, aexp=aexp)
+        out = out / factor
 
-        return out
+    return out
 
 
 class SharedArray(np.ndarray):

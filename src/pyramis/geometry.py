@@ -1,5 +1,6 @@
 import numpy as np
-from . import get_position_keys, get_cell_size, get_vname
+from .config_module import get_vname
+from . import get_position_keys, get_cell_size
 
 class Region():
     def evaluate(self, data):
@@ -50,12 +51,13 @@ class UnionRegion(Region):
 
 
 class Box(Region):
-    def __init__(self, box=None, center=None, extent=None):
+    def __init__(self, box=None, center=None, extent=None, ndim=None):
+        ndim = len(center) if center is not None else (np.array(box).shape[0] if box is not None else 3)
         if box is None:
             if center is not None and extent is not None:
                 self.set_center(center, extent)
             else:
-                box = np.asarray([[0, 1], [0, 1], [0, 1]])
+                box = np.asarray([[0, 1]] * ndim)
         else:
             self.box = np.asarray(box)
 
@@ -119,6 +121,7 @@ class Sphere(Region):
     def __init__(self, center, radius: float):
         self._center = np.asarray(center)
         self.radius = radius
+        self.ndim = len(center)
     
     @property
     def center(self) -> np.ndarray:
@@ -126,7 +129,7 @@ class Sphere(Region):
 
     @property
     def bounding_box(self) -> "Box":
-        box = Box(None)
+        box = Box(None, ndim=self.ndim)
         box.set_center(self.center, self.radius * 2)
         return box
 
@@ -157,6 +160,7 @@ class Spheroid(Region):
     def __init__(self, center, radii: np.ndarray):
         self._center = np.asarray(center)
         self.radii = np.asarray(radii)
+        self.ndim = len(center)
 
     @property
     def center(self) -> np.ndarray:
@@ -164,7 +168,7 @@ class Spheroid(Region):
 
     @property
     def bounding_box(self) -> "Box":
-        box = Box(None)
+        box = Box(None, ndim=self.ndim)
         box.set_center(self.center, self.radii * 2)
         return box
 

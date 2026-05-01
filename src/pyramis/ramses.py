@@ -9,7 +9,8 @@ from concurrent.futures import as_completed
 import configparser
 
 import re
-from . import get_config, get_vname, cgs_unit, timer, format_bytes, ANY, get_position_keys
+from .config_module import get_config, get_vname
+from . import cgs_unit, timer, format_bytes, ANY, get_position_keys
 from .astro import get_cosmo_table, cosmo_convert
 from .core import compute_chunk_list_from_hilbert, str_to_tuple, quad_to_int
 from .utils.hilbert import hilbert_to_compound, HILBERT_KEY_DTYPE
@@ -23,7 +24,7 @@ import h5py
 from multiprocessing.shared_memory import SharedMemory
 from itertools import repeat
 
-def scheduled_snapshots(tout, time, t_thr, iout=None, report_missing=False):
+def _scheduled_snapshots(tout, time, t_thr, iout=None, report_missing=False):
     tout = np.unique(tout)
     tout = np.sort(tout)
     scheduled = np.zeros(len(time), dtype=bool)
@@ -128,10 +129,10 @@ def check_snapshots(path: str, check_data=['amr', 'hydro', 'part'], iout_min=Non
 
     if aout is not None and len(aout) > 0 and not np.all(aout == 0.0):
         a_thr = table['aexp'] / table['nstep_coarse'] * scale_threshold
-        scheduled |= scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
+        scheduled |= _scheduled_snapshots(aout, table['aexp'], a_thr, iout=table['iout'], report_missing=report_missing)
     if tout is not None and len(tout) > 0 and not np.all(tout == 0.0):
         t_thr = table['time'] / table['nstep_coarse'] * scale_threshold
-        scheduled |= scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
+        scheduled |= _scheduled_snapshots(tout, table['time'], t_thr, iout=table['iout'], report_missing=report_missing)
 
     table['scheduled'] = scheduled
     timer.record(f'Checked snapshots in {path} for {check_data}. Found {len(table)} snapshots, with {np.sum(scheduled)} scheduled in namelist.')

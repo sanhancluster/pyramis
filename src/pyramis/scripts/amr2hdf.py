@@ -4,6 +4,7 @@ import h5py
 import numpy as np
 import os
 import time, datetime
+from pyramis.config_module import get_vname
 from tqdm import tqdm
 import argparse
 from packaging.version import Version
@@ -11,7 +12,7 @@ from typing import Optional, Tuple
 
 from pyramis.utils import Timestamp, hilbert3d_map, hilbert_to_compound, hilbert_less_equal, HILBERT_KEY_DTYPE
 from pyramis.utils.arrayview import ArrayView
-from pyramis import ramses, hdf, set_config, get_config, get_vname, get_position_keys
+from pyramis import ramses, hdf, set_config, get_config, get_position_keys
 import tomllib
 
 set_config('VNAME_SET', 'native')

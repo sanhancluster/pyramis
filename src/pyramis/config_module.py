@@ -64,3 +64,34 @@ def _init_worker_config(cfg):
     _config = {}
     _deep_update(_config, cfg)
     _resolve_special_values(_config)
+
+
+def get_vname(vname: str, name_set: str | None=None):
+    config = get_config()
+    if name_set is not None:
+        mapping = config['VNAME_MAPPING'][name_set]
+    else:
+        mapping = config['VNAME_MAPPING'][config['VNAME_SET']]
+    vname = mapping.get(vname, vname)
+    return vname
+
+
+def get_mapping(name_set_from, name_set_to):
+    config = get_config()
+    mapping_to = config['VNAME_MAPPING'][name_set_to]
+    if name_set_from == 'native':
+        return mapping_to
+
+    mapping_from = config['VNAME_MAPPING'][name_set_from]
+    # Create reverse mapping from name_set_from
+    reverse_from = {v: k for k, v in mapping_from.items() if isinstance(v, str)}
+
+    # Create mapping from name_set_from to name_set_to
+    mapping = {}
+    for k, v in mapping_from.items():
+        if isinstance(v, str):
+            mapping[v] = mapping_to.get(k, k)
+        else:
+            mapping[k] = mapping_to.get(k, v)
+    return mapping
+

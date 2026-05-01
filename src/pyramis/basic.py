@@ -1,63 +1,36 @@
 import numpy as np
-from . import config, cgs_unit
+from pyramis.config_module import get_vname
+from . import cgs_unit
 import re
 
-def get_vname(vname: str, name_set: str | None=None):
-    if name_set is not None:
-        mapping = config['VNAME_MAPPING'][name_set]
-    else:
-        mapping = config['VNAME_MAPPING'][config['VNAME_SET']]
-    vname = mapping.get(vname, vname)
-    return vname
+def get_dim_keys(ndim=3) -> list[str]:
+    return ['x', 'y', 'z'][:ndim]
 
 
-def get_mapping(name_set_from, name_set_to):
-    mapping_to = config['VNAME_MAPPING'][name_set_to]
-    if name_set_from == 'native':
-        return mapping_to
-
-    mapping_from = config['VNAME_MAPPING'][name_set_from]
-    # Create reverse mapping from name_set_from
-    reverse_from = {v: k for k, v in mapping_from.items() if isinstance(v, str)}
-
-    # Create mapping from name_set_from to name_set_to
-    mapping = {}
-    for k, v in mapping_from.items():
-        if isinstance(v, str):
-            mapping[v] = mapping_to.get(k, k)
-        else:
-            mapping[k] = mapping_to.get(k, v)
-    return mapping
-
-
-def get_dim_keys():
-        return ['x', 'y', 'z']
-
-
-def get_vector_keys(name_format: str | None=None):
+def get_vector_keys(name_format: str | None=None, ndim=3) -> list[str]:
     if name_format is None:
         name_format = get_vname('POSITION_FORMAT')
-    return [name_format.format(dim=dim) for dim in get_dim_keys()]
+    return [name_format.format(dim=dim) for dim in get_dim_keys(ndim)]
 
 
-def get_vector(data, name_format: str | None=None, axis=-1) -> np.ndarray:
-    return np.stack([data[name] for name in get_vector_keys(name_format=name_format)], axis=axis)
+def get_vector(data, name_format: str | None=None, axis=-1, ndim=3) -> np.ndarray:
+    return np.stack([data[name] for name in get_vector_keys(name_format=name_format, ndim=ndim)], axis=axis)
 
 
-def get_position_keys():
-    return get_vector_keys(name_format=get_vname('POSITION_FORMAT'))
+def get_position_keys(ndim=3):
+    return get_vector_keys(name_format=get_vname('POSITION_FORMAT'), ndim=ndim)
 
 
-def get_position(data, axis=-1) -> np.ndarray:
-    return get_vector(data, name_format=get_vname('POSITION_FORMAT'), axis=axis)
+def get_position(data, axis=-1, ndim=3) -> np.ndarray:
+    return get_vector(data, name_format=get_vname('POSITION_FORMAT'), axis=axis, ndim=ndim)
 
 
-def get_velocity_keys():
-    return get_vector_keys(name_format=get_vname('VELOCITY_FORMAT'))
+def get_velocity_keys(ndim=3):
+    return get_vector_keys(name_format=get_vname('VELOCITY_FORMAT'), ndim=ndim)
 
 
-def get_velocity(data, axis=-1) -> np.ndarray:
-    return get_vector(data, name_format=get_vname('VELOCITY_FORMAT'), axis=axis)
+def get_velocity(data, axis=-1, ndim=3) -> np.ndarray:
+    return get_vector(data, name_format=get_vname('VELOCITY_FORMAT'), axis=axis, ndim=ndim)
 
 
 def get_cell_size(data, boxlen: float=1.0):
