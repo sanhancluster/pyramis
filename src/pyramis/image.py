@@ -376,12 +376,12 @@ def grid_projection(
                 z = zz[mask_level]
 
             volume_weight = 1
-            # get weight for the current level with depending on the line-of-sight depth within the limit.
-            # e.g., the weight is 0.5 if the z-coordinate is in the middle of any z-limits 
             if ndim_data == 3:
+                # get weight for the current level with depending on the line-of-sight depth within the limit.
+                # e.g., the weight is 0.5 if the z-coordinate is in the middle of any z-limits 
                 volume_weight += np.clip((z - lims[proj_z][0]) * 2**grid_level - 0.5, -1, 0) + np.clip((lims[proj_z][1] - z) * 2**grid_level - 0.5, -1, 0)
-            # multiply the weight by the depth of the projected grid. The weight is doubled per each decreasing level except for the levels larger than the grid resolution.
-            volume_weight *= 0.5**grid_level
+                # multiply the weight by the depth of the projected grid. The weight is doubled per each decreasing level except for the levels larger than the grid resolution.
+                volume_weight *= 0.5**grid_level
             # give additional weight to the projection if cell is smaller than the grid resolution
             volume_weight *= 0.25**np.maximum(0, grid_level - levelmax_draw)
             # broadcast volume_weight (N_level,) against weights (N_level, K) in vector mode

@@ -16,7 +16,7 @@ def export_hdf(repo: str, output_path='SINKPROPS/sinkprops.h5', h5py_kwargs=None
         h5py_kwargs = dict(compression='lzf', chunks=True, shuffle=True)
 
     timer.start("Reading sink properties from RAMSES snapshots")
-    sp = pyr.ramses.read_sinkprops(repo, use_process=True, copy_result=True)
+    sp = pyr.ramses.read_sinkprops(repo, use_process=True, return_view=True)
     if isinstance(sp, ArrayView):
         sp = sp._arr
         info = sp.info

@@ -201,7 +201,7 @@ def _chunk_slice_hdf_mp(
     mp_backend="process",
     copy_result=True,
     is_cell=False,
-    subsample=None):
+    subsample=None) -> np.ndarray | ArrayView:
     config = get_config()
 
     if n_workers is None:
@@ -211,14 +211,15 @@ def _chunk_slice_hdf_mp(
     ends = np.asarray(ends)
 
     if region is not None:
-        # 1-pass: each worker reads, filters, and returns its chunk directly
+        # 1-pass: if region is specified, each worker reads, filters, and returns its chunk directly
         jobs = [
             ((path, group_name, target_fields, dtype_out, int(start), int(end), region, is_cell, subsample),)
             for start, end in zip(starts, ends)
         ]
         chunks = run_mp_executor(_load_filter_worker, jobs, backend=mp_backend, n_workers=n_workers, mp_method='submit')
         return np.concatenate(chunks) if chunks else np.empty(0, dtype=dtype_out)
-
+    
+    # 2-pass: first compute chunk sizes, then read directly into pre-allocated shared array without filtering
     ndata_per_chunk = ends - starts
     ndata_tot = int(np.sum(ndata_per_chunk))
 
@@ -233,6 +234,7 @@ def _chunk_slice_hdf_mp(
     total_bytes = ndata_tot * itemsize
 
     if mp_backend == "process" and n_workers > 1:
+        # multiprocessing case: use shared memory to avoid copying large arrays between processes
         shm = SharedMemory(create=True, size=total_bytes)
         try:
             shared_arr = np.ndarray((ndata_tot, ), dtype=dtype_out, buffer=shm.buf)
@@ -303,21 +305,21 @@ def read_hdf(
         exact_cut: bool = True,
         n_workers: int | None = None,
         use_process: bool = True,
-        copy_result: bool = True,
+        return_view: bool = True,
         is_cell: bool = False,
         vname_set: str | None = None,
         use_vname_mapping: bool = True,
-        subsample: int = 1) -> ArrayView:
+        subsample: int = 1) -> ArrayView | np.ndarray:
 
     config = get_config()
 
     timer.start(f"Reading HDF5 data from {filename} in group {name}...")
 
     if n_workers is None:
-        n_workers = config['DEFAULT_N_PROCS']
+        n_workers = config.get('DEFAULT_N_PROCS', 1)
 
     if vname_set is None:
-        vname_set = config['VNAME_SET']
+        vname_set = config.get('VNAME_SET', 'native')
 
     if use_process:
         mp_backend = "process"
@@ -397,6 +399,7 @@ def read_hdf(
                 result = np.concatenate(output_list) if output_list else np.empty(0, dtype=dtype_out)
 
     if n_workers > 1:
+        copy_result = not return_view
         result = _chunk_slice_hdf_mp(
             filename, name, starts, ends, dtype_out, target_fields_native,
             region=region_cut, n_workers=n_workers, mp_backend=mp_backend,
@@ -405,8 +408,9 @@ def read_hdf(
     timer.record(f"Finished reading HDF5 data from {filename}. Found {len(result)} items.")
     if isinstance(result, ArrayView):
         result.info = info
-    else:
-        result = ArrayView(result, info=info)
+        result.region = region
+    elif return_view:
+        result = ArrayView(result, info=info, region=region)
 
     return result
 
@@ -420,10 +424,10 @@ def read_part(
         exact_cut=True,
         n_workers=None,
         use_process=True,
-        copy_result=True,
+        return_view=True,
         vname_set=None,
         use_vname_mapping=True,
-        subsample=1) -> ArrayView:
+        subsample=1) -> ArrayView | np.ndarray:
     """
     Read particle data from HDF5 file.
 
@@ -463,10 +467,10 @@ def read_part(
     config = get_config()
 
     if vname_set is None:
-        vname_set = config['VNAME_SET']
+        vname_set = config.get('VNAME_SET', 'native')
 
     if n_workers is None:
-        n_workers = config['DEFAULT_N_PROCS']
+        n_workers = config.get('DEFAULT_N_PROCS', 1)
 
     if iout is None:
         filename = path
@@ -481,7 +485,7 @@ def read_part(
             return ArrayView(np.empty(0, dtype=np.float64), info=info)
         arrays = [
             read_hdf(filename, pt, region=region, target_fields=target_fields, exact_cut=exact_cut,
-                     n_workers=n_workers, use_process=use_process, copy_result=copy_result,
+                     n_workers=n_workers, use_process=use_process, return_view=return_view,
                      is_cell=False, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
             for pt in part_types
         ]
@@ -498,7 +502,7 @@ def read_part(
             parts.append(out)
         return ArrayView(np.concatenate(parts), info=info)
 
-    return read_hdf(filename, part_type, region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=False, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
+    return read_hdf(filename, part_type, region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, return_view=return_view, is_cell=False, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
 
 
 def read_cell(
@@ -510,11 +514,11 @@ def read_cell(
         exact_cut=True,
         n_workers=None,
         use_process=True,
-        copy_result=True,
+        return_view=True,
         read_branch=False,
         vname_set=None,
         use_vname_mapping=True,
-        subsample=1) -> ArrayView:
+        subsample=1) -> ArrayView | np.ndarray:
     """
     Read cell data from HDF5 file.
 
@@ -536,8 +540,8 @@ def read_cell(
         Number of parallel workers to use. Defaults to config['DEFAULT_N_PROCS'].
     use_process : bool, optional
         Whether to use process-based parallelism. Defaults to True. If False, thread-based parallelism is used.
-    copy_result : bool, optional
-        Whether to return a copy of the result array. Defaults to True. If False, a shared memory view is returned when using multiple processes.
+    return_view : bool, optional
+        Whether to return a view of the result array. Defaults to True. If False, numpy array is returned.
     read_branch : bool, optional
         Whether to read branch cells instead of leaf cells. Defaults to False.
     use_vname_mapping : bool, optional
@@ -547,30 +551,30 @@ def read_cell(
 
     Returns
     -------
-    np.ndarray
+    ArrayView
         Array of cell data.
     """
     
     config = get_config()
 
     if vname_set is None:
-        vname_set = config['VNAME_SET']
+        vname_set = config.get('VNAME_SET', 'native')
 
     if n_workers is None:
-        n_workers = config['DEFAULT_N_PROCS']
+        n_workers = config.get('DEFAULT_N_PROCS', 1)
     
     if iout is None:
         filename = path
     else:
         filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data='cell', iout=iout))
     if levelmax_load is not None:
-        data_leaf = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmax=levelmax_load, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
-        data_branch = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmin=levelmax_load, levelmax=levelmax_load, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
+        data_leaf = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmax=levelmax_load, use_process=use_process, return_view=return_view, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
+        data_branch = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmin=levelmax_load, levelmax=levelmax_load, use_process=use_process, return_view=return_view, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
         data = np.concatenate([data_leaf, data_branch])
     elif read_branch:
-        data = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
+        data = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, return_view=return_view, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
     else:
-        data = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, copy_result=copy_result, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
+        data = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, return_view=return_view, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
     return data
 
 

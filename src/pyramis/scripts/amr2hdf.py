@@ -141,7 +141,7 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
         if len(cpu_list_sub) == 0:
             continue
 
-        part_data = ramses.read_part(path=path, iout=iout, cpulist=cpu_list_sub, read_cpu=True, n_workers=nthread, use_process=True, copy_result=False)
+        part_data = ramses.read_part(path=path, iout=iout, cpulist=cpu_list_sub, read_cpu=True, n_workers=nthread, use_process=True, return_view=False)
 
         if part_data is None:
             raise ValueError("Particle not loaded in snapshot")
@@ -302,7 +302,7 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
         cpu_list_sub = cpu_list[idx:np.minimum(idx + size_load, len(cpu_list))]
         if len(cpu_list_sub) == 0:
             continue
-        cell_data = ramses.read_cell(path=path, iout=iout, cpulist=cpu_list_sub, read_branch=read_branch, read_hydro=True, read_grav=True, read_cpu=True, n_workers=nthread, use_process=True, copy_result=False)
+        cell_data = ramses.read_cell(path=path, iout=iout, cpulist=cpu_list_sub, read_branch=read_branch, read_hydro=True, read_grav=True, read_cpu=True, n_workers=nthread, use_process=True, return_view=False)
 
         # sort the cell data in each hilbert domain to save sorting time later
         ncell_per_cpu = ramses.read_ncell_per_cpu(path, iout, cpu_list_sub, read_branch=read_branch)

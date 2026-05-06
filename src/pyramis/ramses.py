@@ -463,7 +463,7 @@ def read_part(
         exact_cut: bool=True,
         n_workers: int | None=None,
         use_process: bool=False,
-        copy_result: bool=True) -> ArrayView:
+        return_view: bool=True) -> ArrayView:
 
     config = get_config()
     timer.start(f"Reading particle data from {path} at iout={iout}...")
@@ -562,7 +562,7 @@ def read_part(
             _load_part_file,
             n_workers=n_workers,
             mp_backend=mp_backend,
-            copy_result=copy_result
+            return_view=return_view
         )
     
     if exact_cut and region is not None:
@@ -573,7 +573,7 @@ def read_part(
     timer.record(f"Finished reading particle data from {path} at iout={iout}. Found {len(result)} particles.")
     if isinstance(result, ArrayView):
         result.info = info
-    else:
+    elif return_view:
         result = ArrayView(result, info=info)
     return result
 
@@ -628,7 +628,7 @@ def _load_part_file(icpu, output_arr, path, iout, dtype_read, part_type=None):
             output_arr[:] = part_data
 
 
-def read_ncell_per_cpu(path, iout, cpulist=None, info=None, read_branch=False) -> np.ndarray:
+def read_ncell_per_cpu(path, iout, cpulist=None, info=None, read_branch=False, levelmax=None) -> np.ndarray:
     config = get_config()
     timer.message(f"Reading number of cells per CPU for iout={iout} from {path}...", 2)
     if info is None:
@@ -640,6 +640,7 @@ def read_ncell_per_cpu(path, iout, cpulist=None, info=None, read_branch=False) -
     ndim = info['ndim']
     ncpu = info['ncpu']
     nlevelmax = info['nlevelmax']
+    nlevelmax_read = nlevelmax if levelmax is None else min(nlevelmax, levelmax)
     nboundary = info['nboundary']
     twotondim = 2 ** ndim
 
@@ -659,10 +660,13 @@ def read_ncell_per_cpu(path, iout, cpulist=None, info=None, read_branch=False) -
                 f.skip_records(2)
 
             f.skip_records(4)
-            levels, cpus = np.where(ngridfile > 0)
-            for ilevel, jcpu in zip(levels, cpus + 1):
+            levels, cpus = np.nonzero(ngridfile)
+            for ilevel, jcpu in zip(levels + 1, cpus + 1):
                 f.skip_records(3)
                 if jcpu == icpu:
+                    if ilevel == nlevelmax_read:
+                        ncell +=  ngridfile[ilevel-1, jcpu-1] * twotondim
+                        break
                     f.skip_records(3 * ndim + 1)
                     for _ in range(twotondim):
                         son = f.read_ints()
@@ -686,6 +690,7 @@ def read_cell(
         region: Region | np.ndarray | list | None = None, 
         cpulist: Sequence[int] | np.ndarray | None = None,
         target_fields: Sequence[str] | None = None,
+        levelmax = None,
         dtype_hydro = None,
         info: dict | None = None,
         read_hydro=True,
@@ -695,7 +700,7 @@ def read_cell(
         exact_cut: bool=True,
         n_workers: int | None = None,
         use_process: bool=False,
-        copy_result: bool=True) -> ArrayView:
+        return_view: bool=True) -> ArrayView:
 
     config = get_config()
     timer.start(f"Reading cell data from {path} at iout={iout}...")
@@ -761,14 +766,14 @@ def read_cell(
     else:
         cpulist = np.array(cpulist)
     
-    ncell_per_cpu = read_ncell_per_cpu(path, iout, cpulist, info=info, read_branch=read_branch)
+    ncell_per_cpu = read_ncell_per_cpu(path, iout, cpulist, info=info, read_branch=read_branch, levelmax=levelmax)
     ncell = np.sum(ncell_per_cpu) if len(ncell_per_cpu) > 0 else 0
     size_byte = ncell * dtype_out.itemsize
     timer.message(f"Total number of cells to read: {ncell} ({format_bytes(size_byte)}) across {len(cpulist)} / {int(info['ncpu'])} files.")
     if ncell == 0:
         return ArrayView(np.empty(0, dtype=dtype_out), info=info)
     
-    args = (path, iout, dtype_hydro, read_hydro, read_grav, read_branch, info)
+    args = (path, iout, dtype_hydro, read_hydro, read_grav, read_branch, info, levelmax)
 
     if n_workers == 1:
         result = _read_from_cpulist(
@@ -788,7 +793,7 @@ def read_cell(
             _load_cell_file,
             n_workers=n_workers,
             mp_backend=mp_backend,
-            copy_result=copy_result
+            return_view=return_view
         )
     
     if exact_cut and region is not None:
@@ -799,12 +804,12 @@ def read_cell(
     timer.record(f"Finished reading cell data from {path} at iout={iout}. Found {len(result)} cells.")
     if isinstance(result, ArrayView):
         result.info = info
-    else:
+    elif return_view:
         result = ArrayView(result, info=info)
 
     return result
 
-def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, read_grav=False, read_branch=False, info=None):
+def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, read_grav=False, read_branch=False, info=None, levelmax=None):
     config = get_config()
     OCT_OFFSET = np.array([
         [-0.5, -0.5, -0.5],
@@ -825,6 +830,7 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
     ndim = info['ndim']
     ncpu = info['ncpu']
     nlevelmax = info['nlevelmax']
+    nlevelmax_read = nlevelmax if levelmax is None else min(levelmax, nlevelmax)
     nboundary = info['nboundary']
     twotondim = 2 ** ndim
     nhvar = info['nhvar']
@@ -863,7 +869,7 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
             f_amr.skip_records(2)
         f_amr.skip_records(4)
 
-        for ilevel in range(1, nlevelmax + 1):
+        for ilevel in range(1, nlevelmax_read + 1):
             nloop_before = np.count_nonzero(ngridfile[ilevel - 1, :icpu - 1])
             nloop_after = np.count_nonzero(ngridfile[ilevel - 1, icpu:])
             ncache = ngridfile[ilevel - 1, icpu - 1]
@@ -885,7 +891,10 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
                 son = f_amr.read_arrays(twotondim)
                 f_amr.skip_records(2 * twotondim)
 
-                ok = (son == 0) if not read_branch else (son != 0)
+                if ilevel == nlevelmax_read:
+                    ok = np.ones_like(son, dtype=bool)
+                else:
+                    ok = (son == 0) if not read_branch else (son != 0)
 
                 # save the indices of the cells to be read
                 iread, jread = np.nonzero(ok)
@@ -909,7 +918,7 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
         cursor = 0
         with FortranFile(filename_hydro, mode='r') as f_hydro:
             f_hydro.skip_records(6)
-            for ilevel in range(1, nlevelmax + 1):
+            for ilevel in range(1, nlevelmax_read + 1):
                 nloop_before = np.count_nonzero(ngridfile[ilevel - 1, :icpu - 1])
                 nloop_after = np.count_nonzero(ngridfile[ilevel - 1, icpu:])
                 ncache = ngridfile[ilevel - 1, icpu - 1]
@@ -940,7 +949,7 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
                 output_particle_density = ndim1 == ndim + 2
                 skip_grav = twotondim * (2 + ndim) if output_particle_density else twotondim * (1 + ndim)
 
-                for ilevel in range(1, nlevelmax + 1):
+                for ilevel in range(1, nlevelmax_read + 1):
                     nloop_before = np.count_nonzero(ngridfile[ilevel - 1, :icpu - 1])
                     nloop_after = np.count_nonzero(ngridfile[ilevel - 1, icpu:])
                     ncache = ngridfile[ilevel - 1, icpu - 1]
@@ -1031,7 +1040,7 @@ def _read_from_cpulist_mp(
         func: Callable,
         n_workers: int,
         mp_backend: str,
-        copy_result: bool) -> np.ndarray | ArrayView:
+        return_view: bool) -> np.ndarray | ArrayView:
     ndata = np.sum(ndata_per_cpu) if len(ndata_per_cpu) > 0 else 0
     if ndata == 0:
         # No data at all
@@ -1067,14 +1076,14 @@ def _read_from_cpulist_mp(
                         raise exc
 
             # At this point, shared_arr is fully populated with all data
-            if copy_result:
-                result = np.array(shared_arr, copy=True)
-            else:
+            if return_view:
                 # Return the shared view; caller must manage shm lifetime
                 result = ArrayView(shm, (ndata,), dtype_out)
+            else:
+                result = np.array(shared_arr, copy=True)
         finally:
             # Clean up shared memory if we own it (copy_result=True).
-            if copy_result:
+            if not return_view:
                 try:
                     shm.close()
                 except FileNotFoundError:
@@ -1114,7 +1123,8 @@ def read_sink(
         target_fields: Sequence[str] | None = None,
         dtype: np.dtype | list | None = None,
         info: dict | None = None,
-        exact_cut: bool=True) -> ArrayView:
+        exact_cut: bool = True,
+        return_view: bool = True) -> ArrayView:
 
     config = get_config()
     timer.start(f"Reading sink data from {path} at iout={iout}...")
@@ -1155,7 +1165,8 @@ def read_sink(
         nsink = f.read_ints('i4')
         result = np.empty(nsink, dtype=dtype_out)
         if nsink == 0:
-            result = ArrayView(result, info=info)
+            if info is not None and return_view:
+                result = ArrayView(result, info=info)
             return result
         f.skip_records(1)
 
@@ -1165,8 +1176,9 @@ def read_sink(
         result = result[region.contains_data(result, cell=False)]
 
     timer.record(f"Finished reading sink data from {filename}. Found {len(result)} sink particles.")
-
-    return ArrayView(result, info=info)
+    if return_view:
+        result = ArrayView(result, info=info)
+    return result
 
 
 # Functions for reading sink properties
@@ -1205,7 +1217,7 @@ def read_sinkprops(
         dtype: np.dtype | list | None = None,
         n_workers: int | None = None,
         use_process: bool = True,
-        copy_result: bool = True) -> ArrayView | np.ndarray:
+        return_view: bool = True) -> ArrayView | np.ndarray:
 
     config = get_config()    
     timer.record(f"Reading sink properties from {path}...")
@@ -1246,7 +1258,7 @@ def read_sinkprops(
 
     if len(icoarse_read) == 0:
         out = np.empty(0, dtype=dtype_out)
-        if info is not None:        
+        if info is not None and return_view:        
             return ArrayView(out, info=info)
         else:
             return out
@@ -1258,7 +1270,7 @@ def read_sinkprops(
     ndata_tot = np.sum(nsink_per_file)
     if ndata_tot == 0:
         out = np.empty(0, dtype=dtype_out)
-        if info is not None:
+        if info is not None and return_view:
             return ArrayView(out, info=info)
         else:
             return out
@@ -1293,13 +1305,13 @@ def read_sinkprops(
                         raise exc
 
             result = np.array(shared_arr, copy=True)
-            if copy_result:
-                result = np.array(shared_arr, copy=True)
-            else:
+            if return_view:
                 result = ArrayView(shm, (ndata_tot,), dtype_out)
+            else:
+                result = np.array(shared_arr, copy=True)
 
         finally:
-            if copy_result:
+            if not return_view:
                 try:
                     shm.close()
                 except FileNotFoundError:
@@ -1324,7 +1336,7 @@ def read_sinkprops(
         result = shared_arr
     timer.record(f"Finished reading sink properties from {path}. Found {len(result)} items.")
     
-    if info is not None:
+    if info is not None and return_view:
         return ArrayView(result, info=info)
     else:
         return result

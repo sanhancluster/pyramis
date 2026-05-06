@@ -9,6 +9,8 @@ OUTPUT_FORMAT = "output_{iout:05d}"
 
 FILENAME_FORMAT_RAMSES = "{data}_{iout:05d}.out{icpu:05d}"
 
+FILENAME_FORMAT_MINIRAMSES = "{data}.{ifile:05d}"
+
 NAMELIST_FILENAME = "namelist.txt"
 FILE_DESCRIPTOR_FORMAT = "{data}_file_descriptor.txt"
 
@@ -123,6 +125,8 @@ JSINK_FORMAT = "j{dim}"
 SPIN_FORMAT = "s{dim}"
 
 [VNAME_MAPPING.native]
+thermal_pressure = "pressure"
+
 POSITION_FORMAT = "position_{dim}"
 VELOCITY_FORMAT = "velocity_{dim}"
 ANGULAR_MOMENTUM_FORMAT = "angular_momentum_{dim}"

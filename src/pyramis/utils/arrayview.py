@@ -87,6 +87,7 @@ class ArrayView:
         dtype=None,
         auto_cleanup: Optional[bool] = None,
         info=None,
+        region=None,
     ):
         if auto_cleanup is None:
             auto_cleanup = not in_jupyter()
@@ -94,6 +95,7 @@ class ArrayView:
         self._auto_cleanup = auto_cleanup
         self.info = info
         self._closed = False
+        self.region = region
 
         if isinstance(arr_or_shm, SharedMemory):
             if shape is None or dtype is None:
@@ -119,7 +121,7 @@ class ArrayView:
         return cls(shm, shape, dtype, auto_cleanup=auto_cleanup)
 
     @classmethod
-    def _view_of(cls, arr: np.ndarray, shm: Optional[SharedMemory], info) -> "ArrayView":
+    def _view_of(cls, arr: np.ndarray, shm: Optional[SharedMemory], info, region) -> "ArrayView":
         """Create a child ArrayView that is a view into an existing array/shm. Parent owns cleanup."""
         obj = cls.__new__(cls)
         obj._auto_cleanup = False
@@ -127,6 +129,7 @@ class ArrayView:
         obj._closed = False
         obj.shm = shm
         obj._arr = arr
+        obj.region = region
         return obj
 
     def _ensure_open(self):
@@ -162,7 +165,7 @@ class ArrayView:
         # Wrap in a new ArrayView if the result preserves the same structured dtype
         if out.dtype == self._arr.dtype:
             shm = self.shm if np.shares_memory(out, self._arr) else None
-            return ArrayView._view_of(out, shm, self.info)
+            return ArrayView._view_of(out, shm, self.info, self.region)
 
         # Field extraction (different dtype): keep shm alive via SharedArray for contiguous views
         if self.shm is not None and np.shares_memory(out, self._arr):

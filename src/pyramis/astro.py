@@ -61,6 +61,7 @@ def cosmo_convert(table, x, xname, yname):
 
 
 def get_age(data, info):
+    # return age in code unit
     t0 = cosmo_convert(info['cosmo_table'], data[get_vname('birth_time')], 't_sc', 'age')
     aexp = info['aexp']
     t = cosmo_convert(info['cosmo_table'], aexp, 'aexp', 'age')
@@ -68,7 +69,15 @@ def get_age(data, info):
     return age
 
 
-def get_temperature(data, info):
+def get_temperature(data: np.ndarray, info: dict):
+    # return temperature in K
     unit_T = info.get('unit_t', 1.0) ** -2 * info.get('unit_l', 1.0) ** 2 / cgs_constants['k_B'] * cgs_constants['m_u']
     temperature = data[get_vname('pressure')] / data[get_vname('density')] * unit_T
     return temperature
+
+
+def get_sound_speed(data: np.ndarray, info: dict):
+    # return sound speed in code unit
+    gamma = info.get('gamma', 5.0 / 3.0)
+    sound_speed = np.sqrt(gamma * data[get_vname('pressure')] / data[get_vname('density')])
+    return sound_speed
