@@ -194,12 +194,17 @@ def parse_namelist(filename):
     config = configparser.ConfigParser(allow_no_value=True)
     with open(filename, 'r') as file:
         lines = []
+        in_group = False
         for line in file:
             # Replace "&groupname" with "[groupname]"
             if line.strip().startswith("&"):
+                in_group = True
                 line = "[" + line.strip()[1:] + "]\n"
             # Skip the "/" end group notation
             elif line.strip() == "/":
+                in_group = False
+                continue
+            elif not in_group:
                 continue
             lines.append(line)
         
@@ -482,6 +487,12 @@ def read_part(
     else:
         mp_backend = "thread"
 
+    if iout is not None and iout < 0:
+        iouts_avail = check_snapshots(path, check_data=['part'], report_missing=False)['iout']
+        if len(iouts_avail) + iout < 0:
+            raise ValueError(f"iout={iout} is out of range. There are only {len(iouts_avail)} snapshots with particle data.")
+        iout = iouts_avail[iout]
+
     if iout is not None:
         output_dir = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout))
     else:
@@ -718,6 +729,12 @@ def read_cell(
         mp_backend = "process"
     else:
         mp_backend = "thread"
+
+    if iout is not None and iout < 0:
+        iouts_avail = check_snapshots(path, check_data=['amr'], report_missing=False)['iout']
+        if len(iouts_avail) + iout < 0:
+            raise ValueError(f"iout={iout} is out of range. There are only {len(iouts_avail)} snapshots with AMR data.")
+        iout = iouts_avail[iout]
 
     if iout is not None:
         output_name = os.path.join(path, config['OUTPUT_FORMAT'].format(iout=iout))

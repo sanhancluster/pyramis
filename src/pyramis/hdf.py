@@ -52,10 +52,18 @@ def check_snapshots(path: str, check_data=['cell', 'part'], check_info=['aexp', 
             iout_list = iout_list[np.isin(iout_list, iouts_data)]
     if iout_list is None:
         iout_list = np.array([])
-    
-    if 'scheduled' in check_info and 'icoarse' not in check_info:
-        check_info += ['icoarse']
-    
+
+        if 'scheduled' not in check_info:
+            check_info.append('scheduled')
+
+    if 'scheduled' in check_info:
+        if 'aexp' not in check_info:
+            check_info.append('aexp')
+        if 'time' not in check_info:
+            check_info.append('time')
+        if 'icoarse' not in check_info:
+            check_info.append('icoarse')
+
     info_list = [[] for _ in check_info]
     iout_list_new = []
     aout, tout = None, None
@@ -471,6 +479,12 @@ def read_part(
 
     if n_workers is None:
         n_workers = config.get('DEFAULT_N_PROCS', 1)
+    
+    if iout is not None and iout < 0:
+        iouts_avail = check_snapshots(path, check_data=['part'], check_info=[], report_missing=False)['iout']
+        if len(iouts_avail) + iout < 0:
+            raise ValueError(f"iout={iout} is out of range. There are only {len(iouts_avail)} snapshots with particle data.")
+        iout = iouts_avail[iout]
 
     if iout is None:
         filename = path
@@ -562,7 +576,13 @@ def read_cell(
 
     if n_workers is None:
         n_workers = config.get('DEFAULT_N_PROCS', 1)
-    
+
+    if iout is not None and iout < 0:
+        iouts_avail = check_snapshots(path, check_data=['cell'], check_info=[], report_missing=False)['iout']
+        if len(iouts_avail) + iout < 0:
+            raise ValueError(f"iout={iout} is out of range. There are only {len(iouts_avail)} snapshots with cell data.")
+        iout = iouts_avail[iout]
+
     if iout is None:
         filename = path
     else:
@@ -730,7 +750,7 @@ def read_sinkprops(
     return out
 
 
-def read_info_from_hdf(f: h5py.File, cosmo=True, cosmo_table=None) -> dict:
+def read_info_from_hdf(f: h5py.File, cosmo=True, cosmo_table=None, check_group=True) -> dict:
     """
     Extract simulation info from an open HDF5 file.
 
@@ -759,10 +779,18 @@ def read_info_from_hdf(f: h5py.File, cosmo=True, cosmo_table=None) -> dict:
             cosmo_table = get_cosmo_table(H0, omega_m, omega_l, omega_k=omega_k, omega_r=omega_r)
         attrs['cosmo_table'] = cosmo_table
         attrs['lookback_time'] = cosmo_convert(attrs['cosmo_table'], 1.0, 'aexp', 'age') / cgs_unit['Gyr']['factor'] - attrs['age']
+    
+    if check_group:
+        group_keys = list(f.keys())
+        group = {}
+        for key in group_keys:
+            group[key] = f.get(key)
+        attrs['group'] = group
+
     return attrs
 
 
-def read_info(path: str, iout: int, cosmo=True, cosmo_table=None, check_data=['cell', 'part']) -> dict:
+def read_info(path: str, iout: int, cosmo=True, cosmo_table=None, check_data=['cell', 'part'], check_group=True) -> dict:
     """
     Get simulation info from HDF5 file attributes.
 
@@ -776,6 +804,8 @@ def read_info(path: str, iout: int, cosmo=True, cosmo_table=None, check_data=['c
         Whether to include cosmology table and lookback time. Defaults to True.
     cosmo_table : dict, optional
         Precomputed cosmology table. If None, it will be created from file attributes.
+    check_group : bool, optional
+        Whether to check the group structure in the HDF5 file. Defaults to True.
     """
 
     config = get_config()
@@ -790,7 +820,7 @@ def read_info(path: str, iout: int, cosmo=True, cosmo_table=None, check_data=['c
         timer.message(f"Reading simulation info from {fn}...", 2)
         try:
             with h5py.File(fn, 'r') as f:
-                attrs = read_info_from_hdf(f, cosmo=cosmo, cosmo_table=cosmo_table)
+                attrs = read_info_from_hdf(f, cosmo=cosmo, cosmo_table=cosmo_table, check_group=check_group)
                 break
         except BlockingIOError:
             timer.message(f"Skipping file {fn}, which is currently locked.")
