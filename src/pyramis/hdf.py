@@ -113,10 +113,9 @@ def check_snapshots(path: str, check_data=['cell', 'part'], check_info=['aexp', 
     return table
 
 
-def get_by_type(obj: h5py.File | h5py.Group, name:str, datatype=None):
+def get_by_type(obj: h5py.File | h5py.Group, name:str, datatype):
     data = obj.get(name)
-    if datatype is not None:
-        assert isinstance(data, datatype), f"{name} is not of type {datatype}"
+    assert isinstance(data, datatype), f"{name} is not of type {datatype}"
     return data
 
 
@@ -147,8 +146,10 @@ def remap_dtype_names(dtype: np.dtype, mapping: dict | None=None) -> np.dtype:
     """
     config = get_config()
     if mapping is None:
-        mapping = config['VNAME_MAPPING'][config['VNAME_SET']]
+        mapping = dict(config['VNAME_MAPPING'][config['VNAME_SET']])
     new_fields = []
+    if dtype.names is None or dtype.fields is None:
+        raise ValueError("np.dtpye should have names or fields: ", dtype)
     for name in dtype.names:
         if name in mapping and mapping[name] is not None:
             new_name = mapping[name]
@@ -162,10 +163,10 @@ def remap_dtype_names(dtype: np.dtype, mapping: dict | None=None) -> np.dtype:
 def _load_filter_worker(args):
     path, group_name, target_fields_native, dtype_out, start, end, region, is_cell, subsample = args
     with h5py.File(path, 'r', locking=False) as f:
-        group = f.get(group_name)
-        data = group.get('data')
+        group: h5py.Group = f[group_name]  # type:ignore
+        data: h5py.Dataset = group['data']  # type:ignore
         if target_fields_native is not None:
-            data = data.fields(target_fields_native)
+            data = data[target_fields_native]
         if subsample is None:
             subsample = 1
         data_slice = data[start:end:subsample].view(dtype_out)
@@ -181,10 +182,10 @@ def _load_slice_worker(args):
      start, end, offset, ndata) = args
 
     with h5py.File(path, 'r', locking=False) as f:
-        group = f.get(group_name)
-        data = group.get('data')
+        group: h5py.Group = f[group_name]  # type:ignore
+        data: h5py.Dataset = group['data']  # type:ignore
         if target_fields_native is not None:
-            data = data.fields(target_fields_native)
+            data = data.fields(target_fields_native)  # type:ignore
         data_slice = data[start:end].view(dtype_out)
 
         if shm_name is not None:
@@ -207,7 +208,7 @@ def _chunk_slice_hdf_mp(
     region: Region | None=None,
     n_workers=None,
     mp_backend="process",
-    copy_result=True,
+    return_view=True,
     is_cell=False,
     subsample=None) -> np.ndarray | ArrayView:
     config = get_config()
@@ -251,12 +252,12 @@ def _chunk_slice_hdf_mp(
                 for start, end, offset, ndata in zip(starts, ends, offsets, ndata_per_chunk)
                 if ndata > 0]
             run_mp_executor(_load_slice_worker, jobs, backend=mp_backend, n_workers=n_workers, mp_method='submit')
-            if copy_result:
-                result = np.array(shared_arr, copy=True)
-            else:
+            if return_view:
                 result = ArrayView(shm, (ndata_tot,), dtype_out)
+            else:
+                result = np.array(shared_arr, copy=True)
         finally:
-            if copy_result:
+            if not return_view:
                 try:
                     shm.close()
                 except FileNotFoundError:
@@ -324,7 +325,7 @@ def read_hdf(
     timer.start(f"Reading HDF5 data from {filename} in group {name}...")
 
     if n_workers is None:
-        n_workers = config.get('DEFAULT_N_PROCS', 1)
+        n_workers = int(config.get('DEFAULT_N_PROCS', 1))
 
     if vname_set is None:
         vname_set = config.get('VNAME_SET', 'native')
@@ -374,8 +375,8 @@ def read_hdf(
             if levelmin is None:
                 levelmin = 1
             if levelmax is None:
-                levelmax = group.attrs.get('levelmax')
-            level_indices = chunk_indices * group.attrs.get('n_level', 1)
+                levelmax = int(group.attrs['levelmax'])
+            level_indices = chunk_indices * int(group.attrs.get('n_level', 1))
             chunk_indices = level_indices + (levelmin - 1)
             chunk_sizes = levelmax - levelmin + 1
         else:
@@ -407,11 +408,10 @@ def read_hdf(
                 result = np.concatenate(output_list) if output_list else np.empty(0, dtype=dtype_out)
 
     if n_workers > 1:
-        copy_result = not return_view
         result = _chunk_slice_hdf_mp(
             filename, name, starts, ends, dtype_out, target_fields_native,
             region=region_cut, n_workers=n_workers, mp_backend=mp_backend,
-            copy_result=copy_result, is_cell=is_cell, subsample=subsample)
+            return_view=return_view, is_cell=is_cell, subsample=subsample)
 
     timer.record(f"Finished reading HDF5 data from {filename}. Found {len(result)} items.")
     if isinstance(result, ArrayView):
@@ -459,8 +459,8 @@ def read_part(
         Number of parallel workers to use. Defaults to config['DEFAULT_N_PROCS'].
     use_process : bool, optional
         Whether to use process-based parallelism. Defaults to True.
-    copy_result : bool, optional
-        Whether to return a copy of the result array. Defaults to True.
+    return_view : bool, optional
+        Whether to return a ArrayView object of the result array. Defaults to True. If False, np.ndarray is returned.
     use_vname_mapping : bool, optional
         Whether to apply variable name mapping. Defaults to True.
     subsample : int, optional
@@ -588,13 +588,65 @@ def read_cell(
     else:
         filename = os.path.join(path, config['FILENAME_FORMAT_HDF'].format(data='cell', iout=iout))
     if levelmax_load is not None:
-        data_leaf = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmax=levelmax_load, use_process=use_process, return_view=return_view, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
-        data_branch = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, levelmin=levelmax_load, levelmax=levelmax_load, use_process=use_process, return_view=return_view, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
+        # if levelmax_load is set, read the reaf and branch of the last level and concatenate
+        data_leaf = read_hdf(
+            filename,
+            'branch',
+            region=region,
+            target_fields=target_fields,
+            exact_cut=exact_cut,
+            n_workers=n_workers,
+            levelmax=levelmax_load,
+            use_process=use_process,
+            return_view=return_view,
+            is_cell=True,
+            vname_set=vname_set,
+            use_vname_mapping=use_vname_mapping,
+            subsample=subsample)
+        data_branch = read_hdf(
+            filename,
+            'leaf',
+            region=region,
+            target_fields=target_fields,
+            exact_cut=exact_cut,
+            n_workers=n_workers,
+            levelmin=levelmax_load,
+            levelmax=levelmax_load,
+            use_process=use_process,
+            return_view=return_view,
+            is_cell=True,
+            vname_set=vname_set,
+            use_vname_mapping=use_vname_mapping,
+            subsample=subsample)
         data = np.concatenate([data_leaf, data_branch])
     elif read_branch:
-        data = read_hdf(filename, 'branch', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, return_view=return_view, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
+        data = read_hdf(
+            filename,
+            'branch',
+            region=region,
+            target_fields=target_fields,
+            exact_cut=exact_cut,
+            n_workers=n_workers,
+            use_process=use_process,
+            return_view=return_view,
+            is_cell=True,
+            vname_set=vname_set,
+            use_vname_mapping=use_vname_mapping,
+            subsample=subsample)
     else:
-        data = read_hdf(filename, 'leaf', region=region, target_fields=target_fields, exact_cut=exact_cut, n_workers=n_workers, use_process=use_process, return_view=return_view, is_cell=True, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
+        data = read_hdf(
+            filename,
+            'leaf',
+            region=region,
+            target_fields=target_fields,
+            exact_cut=exact_cut,
+            n_workers=n_workers,
+            use_process=use_process,
+            return_view=return_view,
+            is_cell=True,
+            vname_set=vname_set,
+            use_vname_mapping=use_vname_mapping,
+            subsample=subsample)
     return data
 
 
@@ -607,7 +659,7 @@ def _generate_part_reader(part_type: str):
         exact_cut: bool = True,
         n_workers=None,
         use_process: bool = True,
-        copy_result: bool = True,
+        return_view: bool = True,
         vname_set=None,
         use_vname_mapping: bool = True,
     ):
@@ -620,7 +672,7 @@ def _generate_part_reader(part_type: str):
             exact_cut=exact_cut,
             n_workers=n_workers,
             use_process=use_process,
-            copy_result=copy_result,
+            return_view=return_view,
             vname_set=vname_set,
             use_vname_mapping=use_vname_mapping,
         )
@@ -636,7 +688,7 @@ read_tracer = _generate_part_reader("tracer")
 def read_sinkprops(
         path: str,
         filename='SINKPROPS/sinkprops.h5',
-        target_id: int | Sequence[int] | np.ndarray=None,
+        target_id: int | Sequence[int] | np.ndarray | None=None,
         icoarse_min: int | None=None,
         icoarse_max:int | None=None,
         return_data=True,
@@ -750,7 +802,7 @@ def read_sinkprops(
     return out
 
 
-def read_info_from_hdf(f: h5py.File, cosmo=True, cosmo_table=None, check_group=True) -> dict:
+def read_info_from_hdf(f: h5py.File, cosmo=True, cosmo_table=None, check_info='all', check_group=True) -> dict:
     """
     Extract simulation info from an open HDF5 file.
 
@@ -771,20 +823,24 @@ def read_info_from_hdf(f: h5py.File, cosmo=True, cosmo_table=None, check_group=T
     attrs = dict(f.attrs)
     if cosmo:
         if cosmo_table is None:
-            H0 = attrs.get('H0', 70.0)
-            omega_m = attrs.get('omega_m', 0.3)
-            omega_l = attrs.get('omega_l', 0.7)
-            omega_k = attrs.get('omega_k', 0.0)
-            omega_r = attrs.get('omega_r', 0.0)
+            H0: float = float(attrs.get('H0', 70.0))
+            omega_m: float = float(attrs.get('omega_m', 0.3))
+            omega_l: float = float(attrs.get('omega_l', 0.7))
+            omega_k: float = float(attrs.get('omega_k', 0.0))
+            omega_r: float = float(attrs.get('omega_r', 0.0))
             cosmo_table = get_cosmo_table(H0, omega_m, omega_l, omega_k=omega_k, omega_r=omega_r)
         attrs['cosmo_table'] = cosmo_table
-        attrs['lookback_time'] = cosmo_convert(attrs['cosmo_table'], 1.0, 'aexp', 'age') / cgs_unit['Gyr']['factor'] - attrs['age']
+        attrs['lookback_time'] = cosmo_convert(attrs['cosmo_table'], 1.0, 'aexp', 'age') / cgs_unit['Gyr']['factor'] - float(attrs['age'])
     
     if check_group:
         group_keys = list(f.keys())
         group = {}
         for key in group_keys:
-            group[key] = f.get(key)
+            item = f.get(key)
+            if isinstance(item, h5py.Group) and 'data' in item.keys():
+                data = item['data']
+                if isinstance(data, h5py.Dataset):
+                    group[key] = data.size
         attrs['group'] = group
 
     return attrs
@@ -815,17 +871,18 @@ def read_info(path: str, iout: int, cosmo=True, cosmo_table=None, check_data=['c
     if len(filenames) == 0:
         raise FileNotFoundError(f"No HDF5 files found for iout={iout} in {path}")
 
-    attrs = None
+    attrs = {}
     for fn in filenames:
         timer.message(f"Reading simulation info from {fn}...", 2)
         try:
             with h5py.File(fn, 'r') as f:
-                attrs = read_info_from_hdf(f, cosmo=cosmo, cosmo_table=cosmo_table, check_group=check_group)
-                break
+                attrs.update(read_info_from_hdf(f, cosmo=cosmo, cosmo_table=cosmo_table, check_group=check_group))
+                if not check_group:
+                    break
         except BlockingIOError:
             timer.message(f"Skipping file {fn}, which is currently locked.")
             continue
-    if attrs is None:
+    if not attrs:
         raise BlockingIOError(f"Could not read attributes from any file for iout={iout} in {path}")
 
     return attrs
