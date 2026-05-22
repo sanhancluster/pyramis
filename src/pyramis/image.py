@@ -375,7 +375,7 @@ def grid_projection(
             if ndim_data == 3:
                 z = zz[mask_level]
 
-            volume_weight = 1
+            volume_weight = np.ones_like(x)
             if ndim_data == 3:
                 # get weight for the current level with depending on the line-of-sight depth within the limit.
                 # e.g., the weight is 0.5 if the z-coordinate is in the middle of any z-limits 
@@ -419,10 +419,9 @@ def grid_projection(
                 else:
                     grid = crop(grid, range=lims_crop, output_shape=shape, subpixel=subpixel, order=interp_order)
 
-    if vector_mode:
-        return grid
-    return grid.T
-
+    # swap axis to have the correct orientation (y, x) for drawing
+    grid = np.swapaxes(grid, 0, 1)
+    return grid
 
 def part_projection(
         centers, quantities=None, weights=None, shape=100, lims=None,
