@@ -7,29 +7,32 @@ def get_dim_keys(ndim=3) -> list[str]:
     return ['x', 'y', 'z'][:ndim]
 
 
-def get_vector_keys(name_format: str | None=None, ndim=3) -> list[str]:
+def get_vector_names(name_format: str | None=None, ndim=3) -> list[str]:
     if name_format is None:
         name_format = get_vname('POSITION_FORMAT')
     return [name_format.format(dim=dim) for dim in get_dim_keys(ndim)]
 
 
-def get_vector(data, name_format: str | None=None, axis=-1, ndim=3) -> np.ndarray:
-    return np.stack([data[name] for name in get_vector_keys(name_format=name_format, ndim=ndim)], axis=axis)
+def get_vector(data, name_format: str | None=None, axis=-1, ndim=None) -> np.ndarray:
+    if ndim is None:
+        print('ndim', data.info['ndim'])
+        ndim = data.info['ndim']
+    return np.stack([data[name] for name in get_vector_names(name_format=name_format, ndim=ndim)], axis=axis)
 
 
-def get_position_keys(ndim=3):
-    return get_vector_keys(name_format=get_vname('POSITION_FORMAT'), ndim=ndim)
+def get_position_names(ndim=None):
+    return get_vector_names(name_format=get_vname('POSITION_FORMAT'), ndim=ndim)
 
 
-def get_position(data, axis=-1, ndim=3) -> np.ndarray:
+def get_position(data, axis=-1, ndim=None) -> np.ndarray:
     return get_vector(data, name_format=get_vname('POSITION_FORMAT'), axis=axis, ndim=ndim)
 
 
-def get_velocity_keys(ndim=3):
-    return get_vector_keys(name_format=get_vname('VELOCITY_FORMAT'), ndim=ndim)
+def get_velocity_names(ndim=None):
+    return get_vector_names(name_format=get_vname('VELOCITY_FORMAT'), ndim=ndim)
 
 
-def get_velocity(data, axis=-1, ndim=3) -> np.ndarray:
+def get_velocity(data, axis=-1, ndim=None) -> np.ndarray:
     return get_vector(data, name_format=get_vname('VELOCITY_FORMAT'), axis=axis, ndim=ndim)
 
 

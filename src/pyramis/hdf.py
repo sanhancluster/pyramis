@@ -8,7 +8,7 @@ import warnings
 
 from .config_module import get_mapping, get_vname
 
-from . import get_config, get_dim_keys, cgs_unit, timer, get_position_keys
+from . import get_config, get_dim_keys, cgs_unit, timer, get_position_names
 from .core import compute_chunk_list_from_hilbert
 from .geometry import Region, Box
 from .utils.arrayview import ArrayView
@@ -337,7 +337,7 @@ def read_hdf(
     
     if exact_cut and region is not None and target_fields is not None:
         warn = False
-        pos_keys = get_position_keys()
+        pos_keys = get_position_names()
         for key in pos_keys:
             if key not in target_fields:
                 warn = True

@@ -4,7 +4,7 @@ from collections.abc import Sequence, Iterable
 
 import warnings
 from . import uniform_digitize, get_dim_keys
-from .geometry import Box
+from .geometry import Box, Region
 
 from scipy.spatial import Voronoi, Delaunay
 from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
@@ -73,7 +73,7 @@ def grid_projection(
         quantities: np.ndarray | list | None=None,
         weights: np.ndarray | list | None=None,
         shape: np.ndarray | list | int | tuple[int, int] | None=None,
-        lims: Box | np.ndarray | list | None=None,
+        lims: Region | np.ndarray | list | None=None,
         mode: str='sum',
         plot_method: str='hist',
         projector_kwargs: dict={},
@@ -192,9 +192,11 @@ def grid_projection(
         if coarse_bins.shape != (ndim_data,):
             raise ValueError(f"coarse_bins must be a scalar or an array of shape ({ndim_data},)")
     # if lims is None, set all limits to [0, 1]
-    if isinstance(lims, Box):
-        region = lims
+    if isinstance(lims, Region):
+        region = lims.bounding_box
         lims = region.box
+        if domain_lims is None:
+            domain_lims = region.domain_lims
     else:
         if lims is None:
             if domain_lims is None:
@@ -389,7 +391,8 @@ def grid_projection(
             w = ww[mask_level] * vw
 
             # do projection onto current level grid
-            apply_projection(grid=grid, grid_weight=grid_weight, x=x, y=y, quantity=q, weights=w, lims_2d=lims_2d_draw, projector=projector, mode=mode)
+            apply_projection(grid=grid, grid_weight=grid_weight, x=x, y=y, quantity=q, weights=w,
+             lims_2d=lims_2d_draw, projector=projector, mode=mode)
 
             # increase grid size if necessary
             if grid_level >= levelmin_draw and grid_level < levelmax_draw:

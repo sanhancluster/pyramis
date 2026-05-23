@@ -10,7 +10,7 @@ import configparser
 
 import re
 from .config_module import get_config, get_vname
-from . import cgs_unit, timer, format_bytes, ANY, get_position_keys
+from . import cgs_unit, timer, format_bytes, ANY, get_position_names
 from .astro import get_cosmo_table, cosmo_convert
 from .core import compute_chunk_list_from_hilbert, str_to_tuple, quad_to_int
 from .utils.hilbert import hilbert_to_compound, HILBERT_KEY_DTYPE
@@ -741,7 +741,7 @@ def read_cell(
     else:
         output_name = path
 
-    pos_dtype = [(key, np.float64) for key in get_position_keys()[:info['ndim']]]
+    pos_dtype = [(key, np.float64) for key in get_position_names()[:info['ndim']]]
     descr_out = pos_dtype + [(get_vname('level'), np.int32)]
 
     if read_hydro:
@@ -895,7 +895,7 @@ def _load_cell_file(icpu, output_arr, path, iout, dtype_hydro, read_hydro=True, 
                 f_amr.skip_records(3)
 
                 pos = [] # list of position arrays
-                pos_keys = get_position_keys()
+                pos_keys = get_position_names()
                 for idim in range(ndim):
                     if pos_keys[idim] in dtype_out.names:
                         p = f_amr.read_reals(np.float64)

@@ -4,6 +4,8 @@ from multiprocessing.shared_memory import SharedMemory
 import numpy as np
 from typing import Optional
 
+from pyramis.geometry import Box
+
 from ..config_module import get_vname
 from . import in_jupyter
 from .. import get_unit, get_position, get_velocity, get_cell_size, get_mass
@@ -44,7 +46,7 @@ def get_field(data: np.ndarray, info: dict, field_name: str, unit: str | None=No
 
 class SharedArray(np.ndarray):
     """
-    A real np.ndarray subclass that keeps a strong reference to the owning SharedView.
+    A real np.ndarray subclass that keeps a strong reference to the owning ArrayView.
     This ensures the underlying SharedMemory stays alive as long as the array view exists.
     """
 
@@ -67,7 +69,7 @@ class SharedArray(np.ndarray):
 
     @property
     def owner(self) -> "ArrayView":
-        """Access the SharedView that holds the SharedMemory handle."""
+        """Access the ArrayView that holds the SharedMemory handle."""
         return self._owner
 
 
@@ -95,7 +97,16 @@ class ArrayView:
         self._auto_cleanup = auto_cleanup
         self.info = info
         self._closed = False
-        self.region = region
+        if region is None:
+            if info is not None:
+                domain_lims = info.get('domain_lims')
+                ndim = info.get('ndim')
+            else:
+                domain_lims = None
+                ndim = None
+            self.region = Box(domain_lims=domain_lims, ndim=ndim)
+        else:
+            self.region = region
 
         if isinstance(arr_or_shm, SharedMemory):
             if shape is None or dtype is None:
@@ -223,3 +234,6 @@ class ArrayView:
     def __exit__(self, exc_type, exc, tb):
         if self._auto_cleanup:
             self._finalize(unlink=True)
+
+    def __del__(self):
+        self._finalize(unlink=True)

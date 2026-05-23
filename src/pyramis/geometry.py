@@ -1,8 +1,14 @@
 import numpy as np
 from .config_module import get_vname
-from . import get_position_keys, get_cell_size
+from . import get_position_names, get_cell_size
 
 class Region():
+    def __init__(self, ndim: int, domain_lims=None):
+        if domain_lims is None:
+            self.domain_lims = np.array([[0, 1]] * ndim)
+        else:
+            self.domain_lims = np.asarray(domain_lims)
+
     def evaluate(self, data):
         if (isinstance(data, np.ndarray) and data.shape[-1] == 3):
             return self.contains(data)
@@ -51,15 +57,18 @@ class UnionRegion(Region):
 
 
 class Box(Region):
-    def __init__(self, box=None, center=None, extent=None, ndim=None):
-        ndim = len(center) if center is not None else (np.array(box).shape[0] if box is not None else 3)
+    def __init__(self, box=None, center=None, extent=None, ndim=None, domain_lims=None):
+        if ndim is None:
+            ndim = len(center) if center is not None else (np.array(box).shape[0] if box is not None else 3)
         if box is None:
             if center is not None and extent is not None:
                 self.set_center(center, extent)
             else:
-                box = np.asarray([[0, 1]] * ndim)
+                self.box = np.asarray([[0, 1]] * ndim)
         else:
             self.box = np.asarray(box)
+        self.ndim = ndim
+        super().__init__(ndim=ndim, domain_lims=domain_lims)
 
     def set_center(self, center, extent=None):
         center = np.asarray(center)
@@ -102,7 +111,7 @@ class Box(Region):
             half_size = np.asarray(0.0)
 
         mask = np.ones(len(data), dtype=bool)
-        for i, key in enumerate(get_position_keys()):
+        for i, key in enumerate(get_position_names()):
             if np.ndim(half_size) == 0:
                 h = half_size
             elif np.ndim(half_size) == 1:
@@ -112,17 +121,20 @@ class Box(Region):
             mask &= (box[i, 0] <= data[key] + h) & (data[key] - h <= box[i, 1])
         return mask
 
-
     def __getitem__(self, key):
         return self.box[key]
+    
+    def __str__(self) -> str:
+        return super().__str__() + f"(box={self.box})"
 
 
 class Sphere(Region):
-    def __init__(self, center, radius: float):
+    def __init__(self, center, radius: float, ndim=None, domain_lims=None):
         self._center = np.asarray(center)
         self.radius = radius
-        self.ndim = len(center)
-    
+        self.ndim = len(center) if ndim is None else ndim
+        super().__init__(ndim=self.ndim, domain_lims=domain_lims)
+
     @property
     def center(self) -> np.ndarray:
         return self._center
@@ -150,17 +162,18 @@ class Sphere(Region):
 
         # TODO: need more accurate intersection
         dist2 = np.zeros(len(data), dtype=float)
-        for i, key in enumerate(get_position_keys()):
+        for i, key in enumerate(get_position_names()):
             dist2 += (data[key] - center[i])**2
         mask = np.sqrt(dist2) <= radius - half_size
         return mask
 
 
 class Spheroid(Region):
-    def __init__(self, center, radii: np.ndarray):
+    def __init__(self, center, radii: np.ndarray, ndim=None, domain_lims=None):
         self._center = np.asarray(center)
         self.radii = np.asarray(radii)
-        self.ndim = len(center)
+        self.ndim = len(center) if ndim is None else ndim
+        super().__init__(ndim=self.ndim, domain_lims=domain_lims)
 
     @property
     def center(self) -> np.ndarray:
@@ -192,7 +205,7 @@ class Spheroid(Region):
 
         # TODO: need more accurate intersection
         dist2 = np.zeros(len(data), dtype=float)
-        for i, key in enumerate(get_position_keys()):
+        for i, key in enumerate(get_position_names()):
             normed = (data[key] - center[i]) / (radii[i] - half_size)
             dist2 += normed**2
         mask = dist2 <= 1

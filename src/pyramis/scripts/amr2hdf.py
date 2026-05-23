@@ -12,7 +12,7 @@ from typing import Optional, Tuple
 
 from pyramis.utils import Timestamp, hilbert3d_map, hilbert_to_compound, hilbert_less_equal, HILBERT_KEY_DTYPE
 from pyramis.utils.arrayview import ArrayView
-from pyramis import ramses, hdf, set_config, get_config, get_position_keys
+from pyramis import ramses, hdf, set_config, get_config, get_position_names
 import tomllib
 
 set_config('VNAME_SET', 'native')
@@ -150,7 +150,7 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
         npart_per_cpu = ramses.read_npart_per_cpu(path, iout, cpu_list_sub)
         for offset, n in zip(np.cumsum(npart_per_cpu), npart_per_cpu):
             part_slice = part_data[offset - n:offset]
-            hkey = get_hilbert_key(np.asarray([part_slice[key] for key in get_position_keys()]).T, info['nlevelmax'], nthread=nthread)
+            hkey = get_hilbert_key(np.asarray([part_slice[key] for key in get_position_names()]).T, info['nlevelmax'], nthread=nthread)
             sort_idx = np.argsort(hkey, kind='mergesort')
             part_data[offset-n:offset] = part_slice[sort_idx]
         
@@ -160,7 +160,7 @@ def get_new_part_dict(path:str, iout:int, cpu_list, size_load, converted_dtypes,
             if name == 'sink':
                 if pointer_dict[name] == 0: # we load sink data only once
                     part = ramses.read_sink(path=path, iout=iout)
-                    hilbert_key = get_hilbert_key(np.asarray([part[key] for key in get_position_keys()]).T, info['nlevelmax'], nthread=nthread)
+                    hilbert_key = get_hilbert_key(np.asarray([part[key] for key in get_position_names()]).T, info['nlevelmax'], nthread=nthread)
                     part = part[np.argsort(hilbert_key)] # already Particle class at this point
                 else: # sink data is alrady loaded
                     continue
@@ -308,7 +308,7 @@ def get_new_cell(path, iout, cpu_list, size_load, converted_dtypes, read_branch=
         ncell_per_cpu = ramses.read_ncell_per_cpu(path, iout, cpu_list_sub, read_branch=read_branch)
         for offset, n in zip(np.cumsum(ncell_per_cpu), ncell_per_cpu):
             cell_slice = cell_data[offset - n:offset]
-            hkey = get_hilbert_key(np.asarray([cell_slice[key] for key in get_position_keys()]).T, info['nlevelmax'], nthread=nthread)
+            hkey = get_hilbert_key(np.asarray([cell_slice[key] for key in get_position_names()]).T, info['nlevelmax'], nthread=nthread)
             sort_idx = np.argsort(hkey, kind='mergesort')
             cell_data[offset-n:offset] = cell_slice[sort_idx]
 
@@ -372,7 +372,7 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
                         continue
 
                     dt = np.dtype(fmt)
-                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_position_keys():
+                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_position_names():
                         new_fmt = np.dtype(dt.byteorder + 'f4')
                     else:
                         new_fmt = dt
@@ -392,7 +392,7 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
                     key = desc[0]
                     fmt = desc[1]
                     dt = np.dtype(fmt)
-                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_position_keys():
+                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_position_names():
                         new_fmt = np.dtype(dt.byteorder + 'f4')
                     else:
                         new_fmt = dt
@@ -406,7 +406,7 @@ def export_snapshots(path, iout_list, n_chunk, size_load, converted_dtypes_part=
                 new_dtype = []
                 for key, fmt in dtype_cell.descr:
                     dt = np.dtype(fmt)
-                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_position_keys():
+                    if dt.kind == 'f' and dt.itemsize == 8 and key not in get_position_names():
                         new_fmt = np.dtype(dt.byteorder + 'f4')
                     else:
                         new_fmt = dt
@@ -570,7 +570,7 @@ def add_group(fl:h5py.File, name:str, new_data:np.ndarray, levelmin:int, levelma
     timer.message(f"Measuring Hilbert key for {name} data...")
 
     # compute chunk boundaries based on Hilbert key and sort the data accordingly
-    coordinates = np.array([new_data[key] for key in get_position_keys()]).T
+    coordinates = np.array([new_data[key] for key in get_position_names()]).T
     if not part:
         # use level information to compute Hilbert key for cells
         chunk_boundary, hilbert_boundary, sort_key1 = set_hilbert_boundaries(coordinates, new_data['level'], n_chunk, levelmax, part=part, sort=sort)
