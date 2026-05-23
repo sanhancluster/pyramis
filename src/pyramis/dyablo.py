@@ -43,6 +43,25 @@ def check_snapshots(path, prefix=None):
     return snapshots
 
 
+def read_info(path, iout=None, prefix=None):
+    if prefix is None:
+        prefix = ANY
+    timer.start(f"Reading Dyablo info from {path} with prefix {prefix}...")
+    pattern = os.path.join(path, config['FILENAME_FORMAT_DYABLO'].format(prefix=prefix, istep=ANY))
+    files = glob.glob(pattern)
+    if len(files) == 0:
+        raise FileNotFoundError(f"No files found matching pattern {pattern}.")
+    files.sort()
+    if iout is None:
+        iout = -1
+    filename = files[iout]
+
+    with h5py.File(filename, 'r') as f:
+        info = dict(f['scalar_data'].attrs)
+    timer.record(f"Finished reading Dyablo info from {filename}.")
+    return info
+
+
 def read_cell(path, iout=None, istep=None, prefix=None, filename_ini=None):
     if prefix is None:
         prefix = ANY
@@ -123,6 +142,8 @@ def read_cell(path, iout=None, istep=None, prefix=None, filename_ini=None):
         table['position_z'] = centers[:, 2]
 
         if levels is not None:
+            if levels.ndim != table['level'].ndim:
+                levels = levels[:, 0]
             table['level'] = levels
 
     timer.record(f"Finished reading Dyablo cell data from {filename}. Found {n_data} cells.")

@@ -4,7 +4,7 @@
 ## Verbosity level for logging. Higher values will produce more detailed logs.
 VERBOSE_LEVEL = 1
 
-## Directory paths for input and output data. You can change these to match your directory structure.
+## Directory paths for input and output ramses/miniramses data. You can change these to match your directory structure.
 OUTPUT_FORMAT = "output_{iout:05d}"
 
 FILENAME_FORMAT_RAMSES = "{data}_{iout:05d}.out{icpu:05d}"
@@ -67,6 +67,7 @@ mass = "m"
 identity = "id"
 density = "rho"
 pressure = "P"
+thermal_pressure = "P"
 metallicity = "metal"
 initial_mass = "m0"
 birth_time = "epoch"
