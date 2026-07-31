@@ -49,6 +49,7 @@ def _get_halomaker_skip(galaxy=False, double_precision=True):
 
 
 def _read_halo(f:FortranFile, data, struct, vname_set='native'):
+    timer.message("Reading halo data from Data structure: " + str(struct), 4)
     for item in struct:
         if item is None:
             f.skip_records(1)
@@ -66,22 +67,11 @@ def _read_halo(f:FortranFile, data, struct, vname_set='native'):
 
 
 def _read_halo_fast(f:FortranFile, data, struct, vname_set='native'):
-    timer.message("Reading halo data...", 3)
-    for item in struct[:2]:
-        if item is None:
-            f.skip_records(1)
-        else:
-            read = f.read_record('b')
-            names, dtype, *shape = item
-            if not isinstance(names, list):
-                names = [names]
-            names = [get_vname(name, vname_set) for name in names]
-            read = np.array(read).view(dtype)
-            if len(shape) > 0:
-                read = read.reshape((-1, *shape))
-            for name, value in zip(names, read):
-                data[name] = value
+    timer.message("Reading halo data from Data structure: " + str(struct), 4)
+    # step 1: read the first two records, skipping members
+    _read_halo(f, data, struct[:2], vname_set=vname_set)
 
+    # build the dtype for the remaining records
     dtype_read = []
     for item in struct[2:]:
         names, dtype = item
@@ -183,8 +173,12 @@ def read_halomaker(
     else:
         f = FortranFile(path, 'r')
         f.skip_records(6)
+        timer.message(f"Reading {nhalo_snap} halos from {path}...", 3)
         for i in range(nhalo_snap):
-            _read_halo_fast(f, data[i], struct, vname_set=vname_set)
+            if not galaxy:
+                _read_halo_fast(f, data[i], struct, vname_set=vname_set)
+            else:
+                _read_halo(f, data[i], struct, vname_set=vname_set)
         f.close()
 
     size_byte = data.nbytes
