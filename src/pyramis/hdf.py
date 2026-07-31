@@ -166,7 +166,7 @@ def _load_filter_worker(args):
         group: h5py.Group = f[group_name]  # type:ignore
         data: h5py.Dataset = group['data']  # type:ignore
         if target_fields_native is not None:
-            data = data[target_fields_native]
+            data = data.fields(target_fields_native)
         if subsample is None:
             subsample = 1
         data_slice = data[start:end:subsample].view(dtype_out)

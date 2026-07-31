@@ -7,7 +7,7 @@ from .ramses import parse_info, parse_namelist
 from .utils.arrayview import ArrayView
 from .utils.fortranfile import FortranFile
 import numpy as np
-from . import get_dim_keys, get_position_names
+from . import get_position_names
 
 def read_info(path, iout):
     path_info = os.path.join(path, f"output_{iout:05d}", f"info.txt")

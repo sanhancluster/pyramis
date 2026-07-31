@@ -15,7 +15,6 @@ def get_vector_names(name_format: str | None=None, ndim=3) -> list[str]:
 
 def get_vector(data, name_format: str | None=None, axis=-1, ndim=None) -> np.ndarray:
     if ndim is None:
-        print('ndim', data.info['ndim'])
         ndim = data.info['ndim']
     return np.stack([data[name] for name in get_vector_names(name_format=name_format, ndim=ndim)], axis=axis)
 

@@ -15,5 +15,5 @@ from . import utils
 
 timer = utils.Timestamp(verbose_level=config['VERBOSE_LEVEL'])
 
-from . import geometry, halo_finder, image, hdf, ramses, dyablo, astro
+from . import geometry, halo_finder, image, hdf, ramses, dyablo, astro, visualize, image as im, visualize as vis
 timer.message("Initialization complete for Pyramis.", verbose_lim=2)
