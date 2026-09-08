@@ -8,7 +8,7 @@ import warnings
 
 from .config_module import get_mapping, get_vname
 
-from . import get_config, get_dim_keys, cgs_unit, timer, get_position_names
+from . import get_config, get_dim_keys, cgs_unit, timer, get_position_names, format_bytes
 from .core import compute_chunk_list_from_hilbert
 from .geometry import Region, Box
 from .utils.arrayview import ArrayView
@@ -382,18 +382,19 @@ def read_hdf(
         else:
             chunk_sizes = 1
 
-        timer.message(f"Total number of chunks to read: {len(chunk_indices)} / {nchunks}.")
-
         data, dtype_out, target_fields_native, starts, ends = _prepare_hdf_read(
             f, name, 'chunk_boundary', chunk_indices, chunk_sizes,
             target_fields, vname_set, use_vname_mapping)
         boxsize = f.attrs.get('boxsize', 1.0)
+        ndata_tot = int(np.sum(ends - starts))
+        itemsize = dtype_out.itemsize
+
+        timer.message(f"Total number of chunks to read: {len(chunk_indices)} / {nchunks} ({format_bytes(ndata_tot * itemsize)}).")
 
         if n_workers == 1:
             if region_cut is None:
                 # zero-copy path: pre-allocate and fill in-place
                 ndata_per_chunk = ends - starts
-                ndata_tot = int(np.sum(ndata_per_chunk))
                 result = np.empty(ndata_tot, dtype=dtype_out)
                 offset = 0
                 for start, end, ndata in zip(starts, ends, ndata_per_chunk):
@@ -662,6 +663,7 @@ def _generate_part_reader(part_type: str):
         return_view: bool = True,
         vname_set=None,
         use_vname_mapping: bool = True,
+        subsample: int | None = None,
     ):
         return read_part(
             path,
@@ -675,6 +677,7 @@ def _generate_part_reader(part_type: str):
             return_view=return_view,
             vname_set=vname_set,
             use_vname_mapping=use_vname_mapping,
+            subsample=subsample,
         )
 
     return _reader

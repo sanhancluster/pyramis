@@ -42,16 +42,14 @@ def compute_chunk_list_from_hilbert(
     boxlen : float
         The size of the entire box in which the Hilbert curve is defined.
     level_divide : int, optional
-        The level at which to divide the Hilbert curve for chunking. If None, it is computed based on the region size.
+        The level at which to divide the Hilbert curve for chunking. If None, it is computed based on the region size. Higher value leads to more accurate chunk selection but may increase computation time.
     level_subdivide : int | None, optional
-        Additional subdivision level to refine the chunking. If None, the default value from the config is used.
+        Additional subdivision level to refine the chunking when level_divide is computed. If None, the default value from the config is used. Higher value leads to more accurate chunk selection but may increase computation time.
     n_workers : int | None, optional
         The number of workers to use for parallel computation. If None, the default value from the config is used.
     """
     timer.message("Computing chunk list from Hilbert curve...", verbose_lim=2)
     config = get_config()
-    if level_subdivide is None:
-        level_subdivide = int(config.get('DEFAULT_LEVEL_SUBDIVIDE', 2))
     if n_workers is None:
         n_workers = int(config.get('DEFAULT_N_WORKERS', 4))
 
@@ -63,16 +61,21 @@ def compute_chunk_list_from_hilbert(
         region = Box(bounding_box)
     else:
         raise ValueError("region must be either a Region instance or a (ndim, 2) ndarray representing a bounding box.")
-    
+
+    # compute level_divide based on the minimum length of the bounding box if not provided
     if level_divide is None:
         minlen = np.min(bounding_box[:, 1] - bounding_box[:, 0])
         if minlen <= 0:
             return np.array([], dtype=np.int32)
 
+        if level_subdivide is None:
+            level_subdivide = int(config.get('DEFAULT_LEVEL_SUBDIVIDE', 2))
+
         level_divide = -int(np.floor(np.log2(minlen / boxlen))) + level_subdivide
     level_divide = np.minimum(level_divide, level_hilbert)
-    grid_size = boxlen * np.exp2(-level_divide)
-    
+
+    # compute the minimum and maximum indices of the grid that intersect with the bounding box
+    grid_size = boxlen * np.exp2(-level_divide)    
     min_idx = np.floor(bounding_box[:, 0] / grid_size).astype(np.int32)
     max_idx = np.ceil(bounding_box[:, 1] / grid_size).astype(np.int32)
     timer.message(f"Using level_divide={level_divide} for chunking (grid size: {grid_size:.4f}).", verbose_lim=3)
@@ -92,15 +95,23 @@ def compute_chunk_list_from_hilbert(
 
     if not isinstance(region, Box):
         grid_points = grid_points[region.contains((grid_points + 0.5) * grid_size, size=grid_size/2)]
-    _shift = int(ndim * (level_hilbert - level_divide))
+
+    # compute the Hilbert keys over the grid points
     _keys = hilbert3d(grid_points, bit_length=level_divide, n_workers=n_workers)
+
+    # number of shifts to match the level of the Hilbert curve
+    _shift = int(ndim * (level_hilbert - level_divide))
+
+    # upper and lower bounds of the Hilbert keys for the grid points
     hilbert_keys_min = hilbert_shift_left(_keys, _shift)
     hilbert_keys_max = hilbert_shift_left(hilbert_add(_keys, 1), _shift)
+
+    # find the chunk indices that intersect with the region by searching in the hilbert_boundary
     chunk_indices_min = np.searchsorted(hilbert_boundary, hilbert_keys_min, side='right') - 1
     chunk_indices_max = np.searchsorted(hilbert_boundary, hilbert_keys_max, side='left') - 1
-
     chunk_indices = np.unique(np.concatenate([np.arange(start, end + 1) for start, end in zip(chunk_indices_min, chunk_indices_max)]))
     timer.message(f"Found {len(chunk_indices)} chunks intersecting the region.", verbose_lim=3)
+
     return np.sort(chunk_indices).astype(np.int32)
 
 
