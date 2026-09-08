@@ -13,10 +13,17 @@ def get_vector_names(name_format: str | None=None, ndim=3) -> list[str]:
     return [name_format.format(dim=dim) for dim in get_dim_keys(ndim)]
 
 
-def get_vector(data, name_format: str | None=None, axis=-1, ndim=None) -> np.ndarray:
+def get_vector(data, name_format: str | None = None, axis=-1, ndim=None) -> np.ndarray:
     if ndim is None:
-        ndim = data.info['ndim']
-    return np.stack([data[name] for name in get_vector_names(name_format=name_format, ndim=ndim)], axis=axis)
+        try:
+            ndim = data.info['ndim']
+        except (AttributeError, KeyError):
+            names = get_vector_names(name_format=name_format, ndim=3)
+            while names and names[-1] not in data.dtype.names:
+                names.pop()
+            ndim = len(names)
+    names = get_vector_names(name_format=name_format, ndim=ndim)
+    return np.stack([data[name] for name in names], axis=axis)
 
 
 def get_position_names(ndim=None):
