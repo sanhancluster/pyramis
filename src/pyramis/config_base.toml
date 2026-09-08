@@ -16,6 +16,7 @@ FILE_DESCRIPTOR_FORMAT = "{data}_file_descriptor.txt"
 
 FILENAME_FORMAT_HDF = "{data}_{iout:05d}.h5"
 
+FILENAME_INPUT_HALOMAKER = "input_HaloMaker.dat"
 FILENAME_FORMAT_HALOMAKER = "tree_bricks{iout:05d}"
 FILENAME_FORMAT_GALAXYMAKER = "tree_bricks{iout:05d}"
 FILENAME_FORMAT_PTREE = "ptree_{iout:05d}.pkl"

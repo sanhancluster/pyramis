@@ -1,11 +1,13 @@
 import os
 import pickle as pkl
 
+import warnings
 from .config_module import get_vname
 
-from . import get_config, timer, format_bytes
+from . import get_config, timer, format_bytes, get_position_names
 from . import ramses
 from .utils.fortranfile import FortranFile
+from .utils.arrayview import ArrayView
 import numpy as np
 from typing import Sequence
 
@@ -91,13 +93,65 @@ def _read_halo_fast(f:FortranFile, data, struct, vname_set='native'):
             data[name] = value
 
 
+def _parse_input_halomaker(path: str, input_halomaker: str | None=None):
+    with open(path) as f:
+        text = f.read()
+
+    def convert(v):
+        low = v.lower()
+        if low in ('.true.', '.false.'):
+            return low == '.true.'
+        try:
+            return int(v)
+        except ValueError:
+            pass
+        try:
+            return float(v)
+        except ValueError:
+            return v
+
+    config = {}
+    for line in text.splitlines():
+        line = line.split('!', 1)[0].strip()
+        if not line or '=' not in line:
+            continue
+        key, val = line.split('=', 1)
+        config[key.strip()] = convert(val.strip())
+    return config    
+
+
+def read_galaxymaker(
+        path: str,
+        iout:int | None=None,
+        double_precision: bool=True,
+        vname_set=None,
+        error_on_missing=False,
+        input_halomaker=None,
+        position_to_code_unit=True,
+        ) -> np.ndarray:
+    return read_halomaker(
+        path=path,
+        iout=iout,
+        galaxy=True,
+        double_precision=double_precision,
+        vname_set=vname_set,
+        error_on_missing=error_on_missing,
+        input_halomaker=input_halomaker,
+        position_to_code=position_to_code_unit,
+    )
+
+
 def read_halomaker(
         path: str,
         iout:int | None=None,
         galaxy=False,
         double_precision: bool=True,
         vname_set=None,
-        error_on_missing=False) -> np.ndarray:
+        error_on_missing=False,
+        input_halomaker=None,
+        position_to_code=True,
+        mass_to_solar=True
+        ) -> np.ndarray:
     """
     Read HaloMaker output data.
 
@@ -115,7 +169,10 @@ def read_halomaker(
         Variable name set to use. If None, the default from config is used. Default is None.
     error_on_missing : bool, optional
         Whether to raise an error if the file is missing. Default is False.
+    position_to_code_unit : bool, optional
+        Whether to convert positions to code units. Default is True.
     """
+    config = get_config()
 
     if vname_set is None:
         vname_set = config['VNAME_SET']
@@ -183,6 +240,22 @@ def read_halomaker(
 
     size_byte = data.nbytes
     timer.record(f"Finished reading {nhalo_snap} halo data ({format_bytes(size_byte)}) from {path}.")
+
+    if input_halomaker is None:
+        input_halomaker = config['FILENAME_INPUT_HALOMAKER']
+    input_hm_path = os.path.join(os.path.dirname(path), input_halomaker)
+
+    if position_to_code:
+        if os.path.exists(input_hm_path):
+            hm_config = _parse_input_halomaker(input_hm_path)
+            for key in get_position_names(3):
+                data[key] = data[key] / hm_config['lbox'] / aexp + 0.5
+        else:
+            raise FileNotFoundError(f"HaloMaker configuration file is not found: {input_hm_path}")
+
+    if mass_to_solar:
+        key = get_vname('mass')
+        data[key] *= 1E11
 
     return data
 
