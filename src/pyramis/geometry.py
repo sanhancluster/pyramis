@@ -160,10 +160,11 @@ class Sphere(Region):
 
         half_size = get_cell_size(data, boxlen=boxlen) / 2 if cell else 0.0
 
-        # TODO: need more accurate intersection
         dist2 = np.zeros(len(data), dtype=float)
         for i, key in enumerate(get_position_names()):
-            dist2 += (data[key] - center[i])**2
+            # closest point from the cell to the center of the sphere
+            point_cell = np.clip(center[i], data[key] - half_size, data[key] + half_size)
+            dist2 += (point_cell - center[i])**2
         mask = np.sqrt(dist2) <= radius - half_size
         return mask
 
