@@ -10,3 +10,4 @@ dependencies:
   - platformdirs
   - tqdm
   - pip>=19
+  - seaborn
