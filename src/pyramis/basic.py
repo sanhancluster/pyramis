@@ -143,17 +143,19 @@ def uniform_digitize(values, lim, nbins):
     return values_idx
 
 
-def format_bytes(bytes):
+def format_bytes(bytes: int, sig: int=3) -> str:
     if bytes < 1024:
-        return f"{bytes:.2f} B"
+        return f"{bytes:d} B"
     elif bytes < 1024**2:
-        return f"{bytes / 1024:.2f} KiB"
+        value, unit = bytes / 1024, "KiB"
     elif bytes < 1024**3:
-        return f"{bytes / 1024**2:.2f} MiB"
+        value, unit = bytes / 1024**2, "MiB"
     elif bytes < 1024**4:
-        return f"{bytes / 1024**3:.2f} GiB"
+        value, unit = bytes / 1024**3, "GiB"
     else:
-        return f"{bytes / 1024**4:.2f} TiB"
+        value, unit = bytes / 1024**4, "TiB"
+    decimals = sig - int(np.log10(value)) - 1
+    return f"{value:.{decimals}f} {unit}"
 
 
 class Wildcard:

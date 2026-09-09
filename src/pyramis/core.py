@@ -1,5 +1,5 @@
-from typing import Union
 import numpy as np
+from typing import Union, Literal
 
 from .geometry import Box, Region
 from .utils.hilbert import hilbert3d, hilbert_shift_left, hilbert_add, hilbert_less_equal, HILBERT_KEY_DTYPE
@@ -99,7 +99,7 @@ def compute_chunk_list_from_hilbert(
     # compute the Hilbert keys over the grid points
     _keys = hilbert3d(grid_points, bit_length=level_divide, n_workers=n_workers)
 
-    # number of shifts to match the level of the Hilbert curve
+    # number of shifts to match the grid level to the level of the Hilbert curve
     _shift = int(ndim * (level_hilbert - level_divide))
 
     # upper and lower bounds of the Hilbert keys for the grid points
@@ -128,7 +128,7 @@ def str_to_tuple(input_data):
     return tuple(map(int, input_data.split(',')))
 
 
-def quad_to_f128(by, byteorder: str="little"):
+def quad_to_f128(by, byteorder: Literal["little", "big"]="little"):
     """
     receives byte array with format of IEEE 754 quadruple float and converts to numpy.float128 array
     because quadruple float is not supported in numpy
@@ -144,7 +144,7 @@ def quad_to_f128(by, byteorder: str="little"):
     return sign * significand * 2.0 ** np.float128(exponent - 112)
 
 
-def quad_to_int(by, byteorder: str = "little"):
+def quad_to_int(by, byteorder: Literal["little", "big"]="little"):
     """
     receives byte array with format of IEEE 754 quadruple float
     and converts to python int object array
