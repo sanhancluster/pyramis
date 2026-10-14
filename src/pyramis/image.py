@@ -362,10 +362,11 @@ def grid_projection(
     if type == 'part':
         pixel_area = np.prod((lims_2d[:, 1] - lims_2d[:, 0]) / np.array(shape))
 
+        # divide weights by pixel area to get surface weight density
+        ww /= pixel_area
+
         # do projection onto current grid
-        apply_projection(grid=grid, grid_weight=grid_weight, x=xx, y=yy, quantity=qq, weights=ww, lims_2d=lims_2d, projector=projector, mode=mode)
-        
-        grid /= pixel_area
+        apply_projection(grid=grid, grid_weight=grid_weight, x=xx, y=yy, quantity=qq, weights=ww, lims_2d=lims_2d, projector=projector, mode=mode)        
 
         if mode == 'mean' and grid_weight is not None:
             grid /= grid_weight

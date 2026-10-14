@@ -170,6 +170,7 @@ def read_cell(path, iout=None, istep=None, prefix=None, filename_ini=None, retur
         keys = [k for k in f.keys() if k not in ['connectivity', 'coordinates', 'scalar_data']]
 
         for key in keys:
+            timer.message(f"read_cell: Reading {key} from {filename}...", verbose_lim=3)
             dtypes.append((key, f[key].dtype))
         dtypes = np.dtype(dtypes)
         table = np.empty(n_data, dtype=dtypes)
@@ -238,6 +239,7 @@ def read_part(path, iout=None, istep=None, prefix=None, filename_ini=None, retur
         table = np.empty(n_data, dtype=dtypes)
 
         for key in keys:
+            timer.message(f"read_part: Reading {key} from {filename}...", verbose_lim=3)
             table[key] = f[key][:]
 
         if centers is not None:

@@ -501,7 +501,7 @@ def read_part(
         arrays = [
             read_hdf(filename, pt, region=region, target_fields=target_fields, exact_cut=exact_cut,
                      n_workers=n_workers, use_process=use_process, return_view=return_view,
-                     is_cell=False, vname_set=vname_set, use_vname_mapping=use_vname_mapping)
+                     is_cell=False, vname_set=vname_set, use_vname_mapping=use_vname_mapping, subsample=subsample)
             for pt in part_types
         ]
         dtypes = [a.dtype for a in arrays]
