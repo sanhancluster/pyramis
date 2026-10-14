@@ -154,6 +154,9 @@ class Timestamp:
                 self.log.write(f"  {name}: {time_string}\n")
             self.log.close()
 
+    def set_verbose(self, level: int):
+        self.verbose = level
+
 
 def get_time_string(elapsed_time, add_units=False, use_float=False):
     """
