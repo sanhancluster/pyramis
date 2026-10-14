@@ -211,3 +211,86 @@ class Spheroid(Region):
             dist2 += normed**2
         mask = dist2 <= 1
         return mask
+
+def los_basis(los, roll=0.0, up=None):
+    """
+    Build an orthonormal basis whose third axis is the line of sight.
+
+    Parameters
+    ----------
+    los : array-like
+        Line-of-sight direction, shape (3,). Does not need to be normalized.
+    roll : float, optional
+        Rotation of the image axes about the line of sight, in degrees. Positive values rotate the
+        image x-axis towards the image y-axis. Default is 0.
+    up : array-like, optional
+        Direction that should appear as the image y-axis (before `roll` is applied). Only its component
+        perpendicular to `los` is used. If None, the basis is obtained by the minimal rotation of the
+        z-axis onto `los`. Default is None.
+
+    Returns
+    -------
+    basis : np.ndarray
+        Array of shape (3, 3) whose columns are the image x-axis, image y-axis and line of sight.
+    """
+    los = np.asarray(los, dtype=float)
+    los = los / np.linalg.norm(los)
+
+    if up is None:
+        # minimal rotation taking the z-axis onto los (Rodrigues' formula)
+        z_axis = np.array([0.0, 0.0, 1.0])
+        v = np.cross(z_axis, los)
+        c = np.dot(z_axis, los)
+        s = np.linalg.norm(v)
+        if s == 0:
+            basis = np.eye(3) if c > 0 else np.diag([1.0, -1.0, -1.0])
+        else:
+            kmat = np.array([[0, -v[2], v[1]],
+                             [v[2], 0, -v[0]],
+                             [-v[1], v[0], 0]])
+            basis = np.eye(3) + kmat + kmat @ kmat * ((1 - c) / (s**2))
+        e1, e2 = basis[:, 0], basis[:, 1]
+    else:
+        up = np.asarray(up, dtype=float)
+        e2 = up - np.dot(up, los) * los
+        norm = np.linalg.norm(e2)
+        if norm < 1e-12:
+            raise ValueError("`up` must not be parallel to `los`.")
+        e2 = e2 / norm
+        e1 = np.cross(e2, los)
+
+    if roll != 0:
+        theta = np.deg2rad(roll)
+        e1, e2 = np.cos(theta) * e1 + np.sin(theta) * e2, -np.sin(theta) * e1 + np.cos(theta) * e2
+
+    return np.stack([e1, e2, los], axis=1)
+
+
+def transform_los(vector, los, center=None, roll=0.0, up=None):
+    """
+    Rotate vectors into a frame where the line of sight is the z-axis.
+
+    Parameters
+    ----------
+    vector : np.ndarray
+        Array of shape (3,) or (N, 3) to transform.
+    los : array-like
+        Line-of-sight direction, shape (3,).
+    center : array-like, optional
+        Center of rotation. If given, vectors are rotated about this point and shifted back. Default is None.
+    roll : float, optional
+        Rotation about the line of sight, in degrees. See `los_basis`. Default is 0.
+    up : array-like, optional
+        Direction that should appear as the image y-axis. See `los_basis`. Default is None.
+
+    Returns
+    -------
+    vector : np.ndarray
+        Transformed vectors, with the same shape as the input. The first two components are the image
+        coordinates and the third is the depth along the line of sight.
+    """
+    basis = los_basis(los, roll=roll, up=up)
+    if center is not None:
+        center = np.asarray(center)
+        return (vector - center) @ basis + center
+    return vector @ basis
