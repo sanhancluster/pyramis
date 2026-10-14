@@ -7,13 +7,18 @@ def get_dim_keys(ndim=3) -> list[str]:
     return ['x', 'y', 'z'][:ndim]
 
 
-def get_vector_names(name_format: str | None=None, ndim=3) -> list[str]:
+def get_vector_names(name_format: str | None=None, ndim=None) -> list[str]:
+    if ndim is None:
+        ndim = 3
     if name_format is None:
         name_format = get_vname('POSITION_FORMAT')
     return [name_format.format(dim=dim) for dim in get_dim_keys(ndim)]
 
 
 def get_vector(data, name_format: str | None = None, axis=-1, ndim=None) -> np.ndarray:
+    """
+    name_format should be used with string that includes '{dim}'
+    """
     if ndim is None:
         try:
             ndim = data.info['ndim']
