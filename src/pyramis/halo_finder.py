@@ -5,6 +5,7 @@ import warnings
 from .config_module import get_vname
 
 from . import get_config, timer, format_bytes, get_position_names
+from . import hdf
 from . import ramses
 from .utils.fortranfile import FortranFile
 from .utils.arrayview import ArrayView
@@ -148,9 +149,9 @@ def read_halomaker(
         double_precision: bool=True,
         vname_set=None,
         error_on_missing=False,
-        input_halomaker=None,
         position_to_code=True,
-        mass_to_solar=True
+        mass_to_solar=True,
+        snapshot_path=None
         ) -> np.ndarray:
     """
     Read HaloMaker output data.
@@ -176,6 +177,8 @@ def read_halomaker(
 
     if vname_set is None:
         vname_set = config['VNAME_SET']
+
+    repo = path
 
     if iout is not None:
         if galaxy:
@@ -241,21 +244,32 @@ def read_halomaker(
     size_byte = data.nbytes
     timer.record(f"Finished reading {nhalo_snap} halo data ({format_bytes(size_byte)}) from {path}.")
 
-    if input_halomaker is None:
-        input_halomaker = config['FILENAME_INPUT_HALOMAKER']
-    input_hm_path = os.path.join(os.path.dirname(path), input_halomaker)
-
     if position_to_code:
-        if os.path.exists(input_hm_path):
-            hm_config = _parse_input_halomaker(input_hm_path)
-            for key in get_position_names(3):
-                data[key] = data[key] / hm_config['lbox'] / aexp + 0.5
-        else:
-            raise FileNotFoundError(f"HaloMaker configuration file is not found: {input_hm_path}")
+        if snapshot_path is None:
+            snapshot_path = repo
+        if iout is None:
+            iout = int(path[-5:])
+        try:
+            info = hdf.read_info(snapshot_path, iout=iout)
+        except FileNotFoundError:
+            info = ramses.read_info(snapshot_path, iout=iout)
+
+        boxsize = info['unit_l'] / 3.08E24
+        for key in get_position_names(3):
+            data[key] = data[key] / boxsize + 0.5
 
     if mass_to_solar:
         key = get_vname('mass')
-        data[key] *= 1E11
+        if key in data.dtype.names:
+            data[key] *= 1E11
+
+        key = get_vname('virial_mass')
+        if key in data.dtype.names:
+            data[key] *= 1E11
+
+        key = get_vname('bulge_mass')
+        if key in data.dtype.names:
+            data[key] *= 1E11
 
     return data
 
